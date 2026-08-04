@@ -288,8 +288,7 @@ impl EffectCert {
             read_set,
             agent,
         };
-        let bytes =
-            serde_json::to_vec(&preimage).expect("CertPreimage serialization cannot fail");
+        let bytes = serde_json::to_vec(&preimage).expect("CertPreimage serialization cannot fail");
         hex_encode(&Sha256::digest(&bytes))
     }
 
@@ -583,12 +582,8 @@ mod tests {
         assert_eq!(prepared.seq, 1);
         assert_eq!(prepared.vector_clock.get("agent-a"), 1);
 
-        let cert = commit_effect_cert(
-            &fence,
-            prepared,
-            serde_json::json!({"charge_id": "ch_123"}),
-        )
-        .expect("commit with an untouched read set must succeed");
+        let cert = commit_effect_cert(&fence, prepared, serde_json::json!({"charge_id": "ch_123"}))
+            .expect("commit with an untouched read set must succeed");
 
         assert!(cert.verify());
         assert_eq!(cert.domain, "order:1");

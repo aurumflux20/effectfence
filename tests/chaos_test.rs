@@ -27,9 +27,9 @@
 use std::sync::{Arc, Barrier};
 use std::thread;
 
-use core_rs::fence::{
-    commit_effect_cert, prepare_effect_fence, DomainFence, EffectCert, FenceError, PreparedEffect,
-    VectorClock,
+use effectfence::fence::{
+    DomainFence, EffectCert, FenceError, PreparedEffect, VectorClock, commit_effect_cert,
+    prepare_effect_fence,
 };
 
 /// Read `domain`'s current sequence, then block on `barrier` before

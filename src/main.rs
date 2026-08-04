@@ -1,5 +1,5 @@
 //! MCP (Model Context Protocol) stdio server exposing the causal effect
-//! fence (see [`core_rs::fence`]) as two tools -- `fence_prepare` and
+//! fence (see [`effectfence::fence`]) as two tools -- `fence_prepare` and
 //! `fence_commit` -- so agents can route side-effecting tool calls
 //! through the fence instead of racing each other directly.
 //!
@@ -7,16 +7,16 @@
 //! layer.
 
 use anyhow::Result;
-use core_rs::fence::{
-    commit_effect_cert, prepare_effect_fence, DomainFence, PreparedEffect, ReadSetEntry,
-    VectorClock,
+use effectfence::fence::{
+    DomainFence, PreparedEffect, ReadSetEntry, VectorClock, commit_effect_cert,
+    prepare_effect_fence,
 };
 use rmcp::{
+    ErrorData as McpError, ServerHandler, ServiceExt,
     handler::server::wrapper::Parameters,
     model::{CallToolResult, ContentBlock},
     schemars, tool, tool_handler, tool_router,
     transport::stdio,
-    ErrorData as McpError, ServerHandler, ServiceExt,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -37,7 +37,7 @@ struct FencePrepareArgs {
     args: Value,
     /// Other domains this decision cross-checked, and the sequence
     /// observed for each. Do not include `domain` itself here -- see
-    /// the `prepare_effect_fence` docs in `core_rs::fence` for why.
+    /// the `prepare_effect_fence` docs in `effectfence::fence` for why.
     #[serde(default)]
     read_set: Vec<ReadSetEntry>,
     /// Identifier of the calling agent.
@@ -89,7 +89,9 @@ impl EffectFenceServer {
                     .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                 Ok(CallToolResult::success(vec![ContentBlock::text(json)]))
             }
-            Err(err) => Ok(CallToolResult::error(vec![ContentBlock::text(err.to_string())])),
+            Err(err) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                err.to_string(),
+            )])),
         }
     }
 
@@ -106,7 +108,9 @@ impl EffectFenceServer {
                     .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                 Ok(CallToolResult::success(vec![ContentBlock::text(json)]))
             }
-            Err(err) => Ok(CallToolResult::error(vec![ContentBlock::text(err.to_string())])),
+            Err(err) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                err.to_string(),
+            )])),
         }
     }
 }

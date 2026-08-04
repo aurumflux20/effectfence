@@ -1,10 +1,13 @@
 # EffectFence
 
+[![CI](https://github.com/aurumflux20/effectfence/actions/workflows/ci.yml/badge.svg)](https://github.com/aurumflux20/effectfence/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **Your swarm doesn't need more memory. It needs a causal fence around tool side effects.**
 
 EffectFence is a causal concurrency fence for multi-agent tool calls. When more than one agent (or retry, or re-dispatch) can end up trying to run the same side-effecting operation — charge a card, send a payout, provision a resource — EffectFence guarantees exactly one of them wins, and gives every effect that actually runs a content-addressed certificate chained to whatever it was causally built on.
 
-It ships as a Rust library (`core_rs::fence`) and as a stdio [MCP](https://modelcontextprotocol.io) server exposing two tools, `fence_prepare` and `fence_commit`, so agents can route side-effecting tool calls through the fence instead of racing each other directly.
+It ships as a Rust library (`effectfence::fence`) and as a stdio [MCP](https://modelcontextprotocol.io) server exposing two tools, `fence_prepare` and `fence_commit`, so agents can route side-effecting tool calls through the fence instead of racing each other directly.
 
 ## The problem
 
@@ -41,7 +44,7 @@ This is an **in-memory, single-process** fence — `DomainFence` state lives beh
 ## Quickstart: library
 
 ```rust
-use core_rs::fence::{
+use effectfence::fence::{
     prepare_effect_fence, commit_effect_cert, DomainFence, VectorClock,
 };
 
@@ -73,7 +76,7 @@ Build and run the stdio server:
 
 ```bash
 cargo build --release
-./target/release/core-rs
+./target/release/effectfence
 ```
 
 Point any MCP-compatible client (Claude Code, Claude Desktop, etc.) at the binary as a stdio server. It exposes:

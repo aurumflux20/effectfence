@@ -1,14 +1,37 @@
 [package]
-name = "core-rs"
+name = "effectfence"
 version = "0.1.0"
 edition = "2024"
+description = "Causal concurrency fence for multi-agent tool calls: OCC read-sets and lock-free domain reservation stop double-execution races (double-charges, duplicate sends). Ships as a library and an MCP server."
+license = "MIT"
+repository = "https://github.com/aurumflux20/effectfence"
+readme = "README.md"
+keywords = ["mcp", "concurrency", "agents", "idempotency", "fencing"]
+categories = ["concurrency", "development-tools"]
+
+[lib]
+name = "effectfence"
+path = "src/lib.rs"
+
+[[bin]]
+name = "effectfence"
+path = "src/main.rs"
+required-features = ["mcp-server"]
+
+[features]
+default = ["mcp-server"]
+# The `fence` module itself only needs sha2/serde/serde_json/thiserror/schemars.
+# The MCP stdio server (src/main.rs) additionally needs rmcp/tokio/anyhow --
+# gated behind this feature so a pure-library consumer of `effectfence::fence`
+# isn't forced to compile a full async runtime just to use the fencing types.
+mcp-server = ["dep:rmcp", "dep:tokio", "dep:anyhow"]
 
 [dependencies]
-anyhow = "1.0.104"
-rmcp = { version = "3.1.0", features = ["transport-io", "schemars"] }
-schemars = "1.2.2"
+sha2 = "0.11.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-sha2 = "0.11.0"
 thiserror = "2.0.19"
-tokio = { version = "1.53.1", features = ["full"] }
+schemars = "1.2.2"
+anyhow = { version = "1.0.104", optional = true }
+rmcp = { version = "3.1.0", features = ["transport-io", "schemars"], optional = true }
+tokio = { version = "1.53.1", features = ["full"], optional = true }
