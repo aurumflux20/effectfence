@@ -5,6 +5,25 @@
 
 **Your swarm doesn't need more memory. It needs a causal fence around tool side effects.**
 
+```
+⚡ effectfence — THE STORM
+1,000 attempts to charge order #777 ($49.00): concurrent racers + late retries…
+
+ACTUAL EXECUTIONS     :      1   ← the whole point
+served sealed receipt :    995
+told to stand down    :      4
+elapsed               : 22.33ms
+
+💰 double-charges prevented this run: $48,951.00
+✅ ONE execution. Every other attempt was fenced, replayed, or refused.
+```
+
+Run the attack yourself:
+
+```bash
+cargo run --release --example storm
+```
+
 EffectFence is a causal concurrency fence for multi-agent tool calls. When more than one agent (or retry, or re-dispatch) can end up trying to run the same side-effecting operation — charge a card, send a payout, provision a resource — EffectFence guarantees exactly one attempt ever executes it: same-instant races are decided by a lock-free reservation, and late duplicates get the recorded outcome replayed instead of running again. Every effect that does run gets a content-addressed certificate chained to whatever it was causally built on.
 
 It ships as a Rust library (`effectfence::fence`) and as a stdio [MCP](https://modelcontextprotocol.io) server exposing three tools — `fence_prepare`, `fence_commit`, `fence_abort` — so agents can route side-effecting tool calls through the fence instead of racing each other directly.
