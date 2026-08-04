@@ -95,14 +95,59 @@ A concurrent duplicate of the same intent gets `Err(FenceError::IntentInFlight)`
 
 ## Quickstart: MCP server
 
-Build and run the stdio server:
+### Install
+
+With a Rust toolchain ([rustup.rs](https://rustup.rs)):
 
 ```bash
-cargo build --release
-./target/release/effectfence
+cargo install effectfence
 ```
 
-Point any MCP-compatible client (Claude Code, Claude Desktop, etc.) at the binary as a stdio server. It exposes:
+Or build from a clone of this repo:
+
+```bash
+cargo build --release   # binary at ./target/release/effectfence
+```
+
+### Add it to Claude
+
+**Claude Code** (one command):
+
+```bash
+claude mcp add effectfence -- effectfence
+```
+
+(If you built from source instead of `cargo install`, use the full path: `claude mcp add effectfence -- /path/to/target/release/effectfence`.)
+
+**Claude Desktop** — add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "effectfence": {
+      "command": "effectfence"
+    }
+  }
+}
+```
+
+**Any project (team-shared)** — commit a `.mcp.json` at the project root:
+
+```json
+{
+  "mcpServers": {
+    "effectfence": {
+      "command": "effectfence"
+    }
+  }
+}
+```
+
+That's it — no configuration, no environment variables, no accounts. The server holds its fence state in memory for the life of the process.
+
+### The tools
+
+It exposes:
 
 - **`fence_prepare`** — `{ intent, domain, tool, args, agent, read_set?, parent?, known_clock? }` → `{status: "fresh", prepared}` when this attempt wins (run the tool, then report back), or `{status: "already_done", cert}` when this exact action already ran (use the recorded result — do NOT run the tool). Errors mean do not run.
 - **`fence_commit`** — `{ prepared, result }` → `{status: "committed", cert}`. Later duplicates of the intent now replay this cert.
