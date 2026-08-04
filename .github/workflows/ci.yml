@@ -42,3 +42,14 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Format check
         run: cargo fmt -- --check
+
+  storm:
+    name: storm demo must elect exactly one
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 1,000-attempt attack
+        run: |
+          cargo run --release --example storm | tee storm.txt
+          grep -q "ONE execution" storm.txt
