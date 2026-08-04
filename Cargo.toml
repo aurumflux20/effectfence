@@ -2,7 +2,7 @@
 name = "effectfence"
 version = "0.1.0"
 edition = "2024"
-description = "Causal concurrency fence for multi-agent tool calls: OCC read-sets and lock-free domain reservation stop double-execution races (double-charges, duplicate sends). Ships as a library and an MCP server."
+description = "Causal concurrency fence for multi-agent tool calls: an intent ledger, OCC read-sets, and lock-free domain reservation stop double-execution — same-instant races and late duplicate retries alike. Ships as a library and an MCP server."
 license = "MIT"
 repository = "https://github.com/aurumflux20/effectfence"
 readme = "README.md"

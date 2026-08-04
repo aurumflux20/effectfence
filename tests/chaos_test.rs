@@ -1,19 +1,20 @@
-//! Chaos test: real OS threads racing to mutate the *same domain* at the
-//! same time, exercising the exact `AtomicU64` + `compare_exchange`
-//! reservation mechanism behind `prepare_effect_fence`.
+//! Chaos tests: real OS threads racing to run the same effect at the
+//! same time, exercising both fencing layers -- the lock-free domain
+//! reservation (same-instant races) and the intent ledger (duplicate
+//! attempts at the same logical action).
 //!
-//! ## Why the synchronization is built the way it is
+//! ## Why the domain-race synchronization is built the way it is
 //!
-//! A naive version of this test spins up two threads behind a single
-//! `Barrier` and calls the full `prepare_effect_fence` on both. That
-//! does **not** reliably produce a race in practice: the critical
-//! section it needs to land in (a map lookup plus one atomic
-//! `compare_exchange`) takes on the order of nanoseconds, while real OS
-//! thread wake-up jitter *after* a barrier release is orders of
-//! magnitude larger. Measured empirically on this machine: two threads
-//! raced this way collided in 0/500 trials; even 128 threads racing
-//! through the full public API collided in only ~92% of trials --
-//! nowhere near the "every single time" a correctness test needs.
+//! A naive race test spins up two threads behind a single `Barrier` and
+//! calls the full `prepare_effect_fence` on both. That does **not**
+//! reliably produce a domain race in practice: the critical section it
+//! needs to land in (a map lookup plus one atomic `compare_exchange`)
+//! takes on the order of nanoseconds, while real OS thread wake-up
+//! jitter *after* a barrier release is orders of magnitude larger.
+//! Measured empirically on this machine: two threads raced this way
+//! collided in 0/500 trials; even 128 threads collided in only ~92% of
+//! trials -- nowhere near the "every single time" a correctness test
+//! needs.
 //!
 //! [`read_current_then_race_reserve`] fixes this by putting the
 //! `Barrier` *between* the read and the reservation attempt instead of
@@ -21,22 +22,39 @@
 //! guaranteed to have observed the identical `expected_seq` before
 //! either can advance it -- the race is forced by construction, not by
 //! scheduler luck, while still calling the exact same public
-//! `DomainFence::current` / `DomainFence::reserve` methods that
+//! `EffectFence::current` / `EffectFence::reserve` methods that
 //! `prepare_effect_fence` itself calls internally.
+//!
+//! The intent-ledger race needs no such trick: the ledger's check-and-
+//! claim is a single mutex-serialized critical section, so N threads
+//! hitting it together deterministically yield exactly one winner.
 
 use std::sync::{Arc, Barrier};
 use std::thread;
 
 use effectfence::fence::{
-    DomainFence, EffectCert, FenceError, PreparedEffect, VectorClock, commit_effect_cert,
+    Admission, EffectFence, EffectRequest, FenceError, VectorClock, commit_effect_cert,
     prepare_effect_fence,
 };
+
+fn charge_request(intent: &str, domain: &str, agent: String) -> EffectRequest {
+    EffectRequest {
+        intent: intent.to_string(),
+        parent: None,
+        domain: domain.to_string(),
+        tool: "charge_card".to_string(),
+        args: serde_json::json!({"amount_cents": 1999}),
+        read_set: vec![],
+        agent,
+        known_clock: VectorClock::new(),
+    }
+}
 
 /// Read `domain`'s current sequence, then block on `barrier` before
 /// attempting to reserve the next slot at that (now potentially stale)
 /// expectation. See the module docs for why the barrier sits here.
 fn read_current_then_race_reserve(
-    fence: &DomainFence,
+    fence: &EffectFence,
     domain: &str,
     barrier: &Barrier,
 ) -> Result<u64, FenceError> {
@@ -57,7 +75,7 @@ fn two_agents_forced_onto_the_same_domain_exactly_one_wins_every_time() {
     // trial because the barrier placement makes it structural, not
     // probabilistic.
     for trial in 0..100 {
-        let fence = DomainFence::new();
+        let fence = EffectFence::new();
         let domain = format!("order:forced-race-{trial}");
         let barrier = Arc::new(Barrier::new(2));
 
@@ -99,19 +117,23 @@ fn two_agents_forced_onto_the_same_domain_exactly_one_wins_every_time() {
 }
 
 #[test]
-fn winner_of_a_forced_race_commits_a_verifiable_cert_loser_gets_domain_race() {
-    let fence = DomainFence::new();
-    let domain = "order:forced-race-full-pipeline";
-    let barrier = Arc::new(Barrier::new(2));
+fn concurrent_duplicates_of_one_intent_admit_exactly_one_and_replay_after_commit() {
+    // The double-charge scenario end to end: N agents all decide to run
+    // the SAME logical action (same intent) at the same moment. Exactly
+    // one may execute; after it commits, any later duplicate gets the
+    // recorded cert replayed instead of running.
+    const RACERS: usize = 16;
+    let fence = EffectFence::new();
+    let barrier = Arc::new(Barrier::new(RACERS));
 
-    let handles: Vec<_> = ["agent-a", "agent-b"]
-        .into_iter()
-        .map(|agent| {
+    let handles: Vec<_> = (0..RACERS)
+        .map(|i| {
             let fence = fence.clone();
             let barrier = barrier.clone();
             thread::spawn(move || {
-                let outcome = read_current_then_race_reserve(&fence, domain, &barrier);
-                (agent, outcome)
+                let req = charge_request("charge:order-777", "order:777", format!("agent-{i}"));
+                barrier.wait();
+                prepare_effect_fence(&fence, req)
             })
         })
         .collect();
@@ -121,65 +143,67 @@ fn winner_of_a_forced_race_commits_a_verifiable_cert_loser_gets_domain_race() {
         .map(|h| h.join().expect("agent thread panicked"))
         .collect();
 
-    let mut winner: Option<(&str, u64)> = None;
-    let mut loser_error: Option<FenceError> = None;
-    for (agent, outcome) in &results {
-        match outcome {
-            Ok(seq) => {
-                assert!(winner.is_none(), "more than one winner: {results:?}");
-                winner = Some((agent, *seq));
+    let mut winner = None;
+    let mut in_flight_rejections = 0;
+    for result in results {
+        match result {
+            Ok(Admission::Fresh(prepared)) => {
+                assert!(
+                    winner.is_none(),
+                    "two agents were both admitted to run the same intent"
+                );
+                winner = Some(prepared);
             }
-            Err(err) => {
-                assert!(loser_error.is_none(), "more than one loser: {results:?}");
-                loser_error = Some(err.clone());
+            Ok(Admission::Replay(_)) => {
+                panic!("nothing has committed yet -- no replay should be possible")
             }
+            Err(FenceError::IntentInFlight { intent }) => {
+                assert_eq!(intent, "charge:order-777");
+                in_flight_rejections += 1;
+            }
+            Err(other) => panic!("unexpected rejection: {other:?}"),
         }
     }
-
-    let (winner_agent, seq) = winner.expect("exactly one agent must win the forced race");
-    assert!(
-        matches!(loser_error, Some(FenceError::DomainRace { .. })),
-        "loser must be rejected with DomainRace, got {loser_error:?}"
+    let winner = winner.expect("exactly one agent must be admitted");
+    assert_eq!(in_flight_rejections, RACERS - 1);
+    assert_eq!(
+        fence.current("order:777"),
+        1,
+        "only the single winner may consume a domain sequence"
     );
 
-    // Prove the forced race produces something real and usable: the
-    // winner builds a PreparedEffect for the slot it won and commits it
-    // through the actual public pipeline.
-    let mut vector_clock = VectorClock::new();
-    vector_clock.tick(winner_agent);
-    let prepared = PreparedEffect {
-        parent: None,
-        domain: domain.to_string(),
-        seq,
-        tool: "charge_card".to_string(),
-        args: serde_json::json!({"amount_cents": 1999}),
-        vector_clock,
-        read_set: vec![],
-        agent: winner_agent.to_string(),
-    };
-
-    let cert: EffectCert = commit_effect_cert(
+    // The winner executes and commits...
+    let cert = commit_effect_cert(
         &fence,
-        prepared,
-        serde_json::json!({"charge_id": "ch_forced_race_winner"}),
+        winner,
+        serde_json::json!({"charge_id": "ch_race_winner"}),
     )
-    .expect("winner's commit must succeed -- nothing it read has changed");
-
+    .expect("winner's commit must succeed");
     assert!(cert.verify());
-    assert_eq!(cert.seq, seq);
+
+    // ...and a late duplicate now gets the recorded outcome, not a
+    // second execution.
+    match prepare_effect_fence(
+        &fence,
+        charge_request("charge:order-777", "order:777", "agent-late".to_string()),
+    )
+    .expect("a duplicate of a done intent is not an error")
+    {
+        Admission::Replay(replayed) => assert_eq!(replayed.hash, cert.hash),
+        Admission::Fresh(_) => panic!("late duplicate must NOT be admitted to run"),
+    }
+    assert_eq!(fence.current("order:777"), 1);
 }
 
 #[test]
-fn many_concurrent_agents_through_the_full_api_never_double_allocate_a_sequence() {
-    // A complementary, higher-concurrency test that does NOT depend on
-    // observing a rejection (unlike the tests above, it doesn't force
-    // the interleaving) -- it exercises `prepare_effect_fence` exactly
-    // as a real caller would, under real contention, and asserts the
-    // safety property that actually matters for "stop double charges":
-    // no two winners ever receive the same sequence number, and the
-    // winners collectively occupy a gapless 1..=N range.
+fn many_distinct_intents_on_one_domain_never_double_allocate_a_sequence() {
+    // Genuinely different actions (distinct intents) contending on the
+    // same domain through the full public API, under real contention.
+    // The safety property that matters: no two winners ever receive the
+    // same sequence number, and the winners collectively occupy a
+    // gapless 1..=N range.
     const AGENTS: usize = 32;
-    let fence = DomainFence::new();
+    let fence = EffectFence::new();
     let domain = "order:stress";
     let barrier = Arc::new(Barrier::new(AGENTS));
 
@@ -188,17 +212,9 @@ fn many_concurrent_agents_through_the_full_api_never_double_allocate_a_sequence(
             let fence = fence.clone();
             let barrier = barrier.clone();
             thread::spawn(move || {
+                let req = charge_request(&format!("charge:{i}"), domain, format!("agent-{i}"));
                 barrier.wait();
-                prepare_effect_fence(
-                    &fence,
-                    None,
-                    domain,
-                    "charge_card",
-                    serde_json::json!({}),
-                    vec![],
-                    format!("agent-{i}"),
-                    &VectorClock::new(),
-                )
+                prepare_effect_fence(&fence, req)
             })
         })
         .collect();
@@ -210,7 +226,10 @@ fn many_concurrent_agents_through_the_full_api_never_double_allocate_a_sequence(
 
     let mut seqs: Vec<u64> = results
         .iter()
-        .filter_map(|r| r.as_ref().ok().map(|p| p.seq))
+        .filter_map(|r| match r {
+            Ok(Admission::Fresh(prepared)) => Some(prepared.seq),
+            _ => None,
+        })
         .collect();
     seqs.sort_unstable();
 
