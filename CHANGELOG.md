@@ -2,6 +2,15 @@
 
 All notable changes to EffectFence.
 
+## [0.1.1] — 2026-08-04
+
+### Fixed
+- **Precision: retired the "lock-free" claim.** The race *decision* is a
+  single atomic `compare_exchange`, but the counter lookup sits behind a
+  short mutex — so "lock-free" overstated the hot path. Docs, README,
+  crate description, and comments now say exactly what the code does.
+  For a correctness library, wording is part of the API.
+
 ## [Unreleased]
 - Roadmap: crates.io publish · docs.rs reference · wrap-mode proxy (auto-fence any MCP server, zero code change) · distributed backend exploration
 
@@ -14,7 +23,7 @@ First public release.
   one executes, later duplicates replay the recorded certificate; failed or
   unknown outcomes stay fenced until explicitly reconciled (`clear_intent`).
   Crashed holders lose their lease after a TTL.
-- **Lock-free domain fencing** — same-instant races decided by a single
+- **CAS domain fencing** — same-instant races decided by a single
   `compare_exchange`; exactly one winner per expected sequence.
 - **Content-addressed EffectCerts** — SHA-256-sealed records of every
   committed effect with causal `parent` chaining and per-agent vector clocks.

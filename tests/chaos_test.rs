@@ -1,5 +1,5 @@
 //! Chaos tests: real OS threads racing to run the same effect at the
-//! same time, exercising both fencing layers -- the lock-free domain
+//! same time, exercising both fencing layers -- the CAS-decided domain
 //! reservation (same-instant races) and the intent ledger (duplicate
 //! attempts at the same logical action).
 //!

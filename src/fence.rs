@@ -29,7 +29,7 @@
 //!      the intent.
 //!   2. **Read-set validation** — every dependency must still be at the
 //!      sequence the caller observed, or [`FenceError::ReadSetStale`].
-//!   3. **Domain reservation** — a lock-free `compare_exchange` reserves
+//!   3. **Domain reservation** — an atomic `compare_exchange` reserves
 //!      the next sequence in the target domain; two same-instant racers
 //!      observing the same state can't both win
 //!      ([`FenceError::DomainRace`] for the loser).
@@ -263,7 +263,7 @@ enum IntentState {
 #[derive(Debug)]
 struct Inner {
     config: FenceConfig,
-    /// Lock-free per-domain sequence counters. The map lookup/insert is
+    /// Per-domain sequence counters decided by atomic CAS. The map lookup/insert is
     /// behind a short-held `Mutex`, but sequence reservation itself never
     /// holds it — that's a `compare_exchange` on the `Arc<AtomicU64>`.
     domains: Mutex<HashMap<String, Arc<AtomicU64>>>,
@@ -632,7 +632,7 @@ pub enum FenceError {
 }
 
 /// Admit `req` through the three gates (intent ledger, read-set
-/// validation, lock-free domain reservation) described in the module
+/// validation, atomic CAS domain reservation) described in the module
 /// docs.
 ///
 /// Returns [`Admission::Fresh`] with a ticket when this attempt wins —
@@ -703,7 +703,8 @@ pub fn prepare_effect_fence(
         }
     }
 
-    // Gate 3: lock-free domain reservation.
+    // Gate 3: CAS domain reservation (the race decision is a single
+    // compare_exchange; the counter lookup is behind a short mutex).
     let expected_seq = fence.current(&req.domain);
     let seq = match fence.reserve(&req.domain, expected_seq) {
         Ok(seq) => seq,

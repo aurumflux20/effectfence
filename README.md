@@ -26,7 +26,7 @@ Run the attack yourself:
 cargo run --release --example storm
 ```
 
-EffectFence is a causal concurrency fence for multi-agent tool calls. When more than one agent (or retry, or re-dispatch) can end up trying to run the same side-effecting operation — charge a card, send a payout, provision a resource — EffectFence guarantees exactly one attempt ever executes it: same-instant races are decided by a lock-free reservation, and late duplicates get the recorded outcome replayed instead of running again. Every effect that does run gets a content-addressed certificate chained to whatever it was causally built on.
+EffectFence is a causal concurrency fence for multi-agent tool calls. When more than one agent (or retry, or re-dispatch) can end up trying to run the same side-effecting operation — charge a card, send a payout, provision a resource — EffectFence guarantees exactly one attempt ever executes it: same-instant races are decided by an atomic compare-exchange reservation, and late duplicates get the recorded outcome replayed instead of running again. Every effect that does run gets a content-addressed certificate chained to whatever it was causally built on.
 
 It ships as a Rust library (`effectfence::fence`) and as a stdio [MCP](https://modelcontextprotocol.io) server exposing three tools — `fence_prepare`, `fence_commit`, `fence_abort` — so agents can route side-effecting tool calls through the fence instead of racing each other directly.
 
@@ -50,7 +50,7 @@ Four pieces compose into the fencing protocol:
 
 **OCC read-sets** (`ReadSetEntry`) record the causal dependencies a decision was based on: "when I decided to act, domain `D` was at sequence `S`." Both `prepare_effect_fence` and `commit_effect_cert` validate every entry against live state — if anything moved, the attempt is rejected as stale rather than allowed to act on outdated information.
 
-**Lock-free domain fencing** is where same-instant races are decided. Each domain (a named contention scope, e.g. `"order:123"`) has an `AtomicU64` sequence counter. Reserving the next slot is a single `compare_exchange` — no locks held across the decision, and exactly one concurrent caller can win for any given expected sequence.
+**CAS domain fencing** is where same-instant races are decided. Each domain (a named contention scope, e.g. `"order:123"`) has an `AtomicU64` sequence counter. The *decision* is a single atomic `compare_exchange` — exactly one concurrent caller can win for any given expected sequence. (Precision note: the counter *lookup* sits behind a short mutex; only the race decision itself is lock-free. Ideas for a fully lock-free path are welcome.)
 
 ```
               ┌ intent gate ──────── already done? → Replay(recorded cert)   [do NOT run]
