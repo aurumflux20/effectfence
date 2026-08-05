@@ -8,11 +8,10 @@
 //! the same intent and the CHILD answers "already in flight" the second
 //! time. So:
 //!
-//!   - wrap working  -> second identical call never reaches the child;
-//!                      the proxy replays response #1 verbatim
-//!                      (same fence_token).
-//!   - wrap leaking  -> the child sees call #2 and returns an in-flight
-//!                      error, which is a different response.
+//!   - wrap working: the second identical call never reaches the child;
+//!     the proxy replays response #1 verbatim (same fence_token).
+//!   - wrap leaking: the child sees call #2 and returns an in-flight
+//!     error, which is a different response.
 //!
 //! Comparing the two responses therefore proves the duplicate was stopped
 //! AT THE PROXY, not merely that "nothing crashed".
