@@ -12,7 +12,14 @@ All notable changes to EffectFence.
   For a correctness library, wording is part of the API.
 
 ## [Unreleased]
-- Roadmap: crates.io publish · docs.rs reference · wrap-mode proxy (auto-fence any MCP server, zero code change) · distributed backend exploration
+### Added
+- **Wrap mode** (`effectfence wrap -- <command>`): stands in front of ANY
+  MCP server and fences every tool call automatically — tool list mirrored
+  1:1, intents derived from canonicalized `hash(tool + args)`, identical
+  duplicates replayed at the proxy without reaching the child, tool-level
+  errors and child failures free the intent for retry (fail-safe).
+  Proven end-to-end wrapping the Python `once-mcp` server. Ships in v0.2.
+- Roadmap: distributed backend exploration · CI integration test for wrap
 
 ## [0.1.0] — 2026-08-04
 

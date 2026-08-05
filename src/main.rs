@@ -115,6 +115,16 @@ impl ServerHandler for EffectFenceServer {}
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() >= 2 && args[1] == "wrap" {
+        // `effectfence wrap -- <command> [args...]` (the `--` is optional)
+        let child: Vec<String> = args[2..]
+            .iter()
+            .skip_while(|a| a.as_str() == "--")
+            .cloned()
+            .collect();
+        return effectfence::wrap::run_wrap(child).await;
+    }
     let service = EffectFenceServer::default().serve(stdio()).await?;
     service.waiting().await?;
     Ok(())

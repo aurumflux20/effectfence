@@ -33,5 +33,5 @@ serde_json = "1.0.151"
 thiserror = "2.0.19"
 schemars = "1.2.2"
 anyhow = { version = "1.0.104", optional = true }
-rmcp = { version = "3.1.0", features = ["transport-io", "schemars"], optional = true }
+rmcp = { version = "3.1.0", features = ["transport-io", "schemars", "client", "transport-child-process"], optional = true }
 tokio = { version = "1.53.1", features = ["full"], optional = true }
