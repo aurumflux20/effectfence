@@ -185,6 +185,12 @@ cargo clippy --all-targets
 
 `tests/chaos_test.rs` uses real OS threads to prove the two guarantees separately: a forced same-instant domain race (synchronization deliberately constructed so the collision is guaranteed, not hoped for) admits exactly one winner every time, and 16 concurrent duplicates of one intent admit exactly one execution — with late duplicates replaying the committed cert. A 32-thread stress test additionally asserts sequence numbers are never double-allocated.
 
+## Sibling project — `once` (Python)
+
+Same problem, other runtime. [**once**](https://github.com/aurumflux20/once-kernel) (`pip install once-kernel`) is the Python idempotency kernel built on the same idea: a side effect runs exactly once under retries, webhook redelivery, and concurrent workers. It goes further on durability — a Postgres store, heartbeat leases with fence tokens so a stale worker can't resurrect after its lease is reclaimed, and RFC 8785 canonical payload fingerprints.
+
+Use EffectFence when your fence lives in Rust or in front of an MCP server; use `once` when the side effect is Python and you want a durable store. `effectfence wrap` has been proven fencing `once`'s own MCP server.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
