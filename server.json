@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.aurumflux20/effectfence",
   "title": "EffectFence",
-  "description": "Stops agents from double-firing side effects. When retries or concurrent agents race to charge a card, send an email, or provision a resource, an atomic compare-exchange elects exactly one execution — late duplicates replay a sealed, content-addressed receipt instead of running again.",
+  "description": "Stops agents double-firing side effects: 1,000 racing duplicates, exactly one execution.",
   "version": "0.1.2",
   "repository": {
     "url": "https://github.com/aurumflux20/effectfence",
