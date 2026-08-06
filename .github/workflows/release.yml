@@ -1,0 +1,49 @@
+name: Release binaries
+
+# Prebuilt binaries so nobody needs a Rust toolchain to run the MCP server --
+# including directory build sandboxes (Glama), which have no C linker and would
+# otherwise have to compile tokio + rmcp from source inside a timeout.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and attach to (e.g. v0.1.3)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release binary
+        run: cargo build --release --bin effectfence
+
+      - name: Prove the binary answers MCP introspection
+        run: |
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+            | ./target/release/effectfence | tee out.json
+          grep -q '"serverInfo"' out.json
+          grep -q 'effectfence' out.json
+
+      - name: Package
+        run: |
+          tar -czf effectfence-x86_64-unknown-linux-gnu.tar.gz -C target/release effectfence
+          sha256sum effectfence-x86_64-unknown-linux-gnu.tar.gz > effectfence-x86_64-unknown-linux-gnu.tar.gz.sha256
+
+      - name: Publish to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "Prebuilt Linux binary for the EffectFence MCP server. No Rust toolchain required."
+          gh release upload "$TAG" \
+            effectfence-x86_64-unknown-linux-gnu.tar.gz \
+            effectfence-x86_64-unknown-linux-gnu.tar.gz.sha256 \
+            --repo "$GITHUB_REPOSITORY" --clobber
