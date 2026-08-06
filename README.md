@@ -1,5 +1,7 @@
 # EffectFence
 
+<!-- mcp-name: io.github.aurumflux20/effectfence -->
+
 [![CI](https://github.com/aurumflux20/effectfence/actions/workflows/ci.yml/badge.svg)](https://github.com/aurumflux20/effectfence/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/effectfence.svg)](https://crates.io/crates/effectfence)
 [![docs.rs](https://img.shields.io/docsrs/effectfence)](https://docs.rs/effectfence)
