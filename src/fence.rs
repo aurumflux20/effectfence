@@ -202,7 +202,12 @@ pub struct EffectRequest {
     /// Name of the tool/effect being fenced, e.g. `"charge_card"`.
     pub tool: String,
     /// Arbitrary JSON arguments for the tool call being fenced.
+    // Schema'd as a nullable object, not the untyped `Value`: schemars emits
+    // no `type` for `Value`, and MCP clients that build tool forms from the
+    // schema fail on the field (Glama's Inspector: "Unknown field type
+    // undefined"). The description is public API -- keep this note out of it.
     #[serde(default)]
+    #[schemars(with = "Option<std::collections::BTreeMap<String, Value>>")]
     pub args: Value,
     /// Other domains this decision cross-checked, and the sequence
     /// observed for each. Do not include `domain` itself here — its own
@@ -440,6 +445,18 @@ impl EffectFence {
 /// `parent`, which chains this certificate to whatever it was causally
 /// built on. Two certs with the same hash are, by definition, records of
 /// the exact same effect.
+
+/// JSON Schema for a field that may hold *any* JSON value.
+///
+/// `serde_json::Value` on its own produces a schema with no `type`, which MCP
+/// clients cannot render into a form field. A tool's result really can be any
+/// JSON type, so enumerate them rather than pretending it is an object.
+pub fn any_json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": ["object", "array", "string", "number", "boolean", "null"]
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EffectCert {
     /// The intent this effect executed under. Replays of the same intent
@@ -451,7 +468,11 @@ pub struct EffectCert {
     pub domain: String,
     pub seq: u64,
     pub tool: String,
+    // Schema'd as a nullable object -- see EffectRequest::args.
+    #[schemars(with = "Option<std::collections::BTreeMap<String, Value>>")]
     pub args: Value,
+    // Any JSON type -- see any_json_schema.
+    #[schemars(schema_with = "any_json_schema")]
     pub result: Value,
     pub vector_clock: VectorClock,
     pub read_set: Vec<ReadSetEntry>,
@@ -569,6 +590,8 @@ pub struct PreparedEffect {
     pub domain: String,
     pub seq: u64,
     pub tool: String,
+    // Schema'd as a nullable object -- see EffectRequest::args.
+    #[schemars(with = "Option<std::collections::BTreeMap<String, Value>>")]
     pub args: Value,
     pub vector_clock: VectorClock,
     pub read_set: Vec<ReadSetEntry>,
@@ -1175,5 +1198,58 @@ mod tests {
         assert!(second.vector_clock.get("agent-a") >= 1);
         assert!(second.vector_clock.get("agent-b") >= 1);
         assert!(second.verify());
+    }
+}
+
+#[cfg(test)]
+mod schema_contract {
+    //! MCP clients build their tool forms from the JSON Schema. A field with
+    //! no declared `type` cannot be rendered -- Glama's Inspector reported
+    //! "Unknown field type undefined" for `args` when it was a bare
+    //! `serde_json::Value`. These tests are the tripwire: every property of
+    //! every tool-facing struct must declare a type.
+
+    fn assert_every_property_has_a_type(schema: serde_json::Value, what: &str) {
+        let props = schema
+            .get("properties")
+            .and_then(|p| p.as_object())
+            .unwrap_or_else(|| panic!("{what}: schema has no properties"));
+        for (name, prop) in props {
+            assert!(
+                prop.get("type").is_some() || prop.get("$ref").is_some(),
+                "{what}.{name} declares no `type` -- MCP clients cannot render it"
+            );
+        }
+    }
+
+    #[test]
+    fn tool_facing_schemas_declare_a_type_for_every_field() {
+        for (what, schema) in [
+            (
+                "EffectRequest",
+                serde_json::to_value(schemars::schema_for!(super::EffectRequest)).unwrap(),
+            ),
+            (
+                "PreparedEffect",
+                serde_json::to_value(schemars::schema_for!(super::PreparedEffect)).unwrap(),
+            ),
+            (
+                "EffectCert",
+                serde_json::to_value(schemars::schema_for!(super::EffectCert)).unwrap(),
+            ),
+        ] {
+            assert_every_property_has_a_type(schema, what);
+        }
+    }
+
+    #[test]
+    fn args_is_a_nullable_object_not_an_untyped_value() {
+        let schema = serde_json::to_value(schemars::schema_for!(super::EffectRequest)).unwrap();
+        let args = &schema["properties"]["args"];
+        assert_eq!(
+            args["type"],
+            serde_json::json!(["object", "null"]),
+            "args must be a nullable object so clients can render it"
+        );
     }
 }
