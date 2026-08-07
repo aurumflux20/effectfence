@@ -445,18 +445,6 @@ impl EffectFence {
 /// `parent`, which chains this certificate to whatever it was causally
 /// built on. Two certs with the same hash are, by definition, records of
 /// the exact same effect.
-
-/// JSON Schema for a field that may hold *any* JSON value.
-///
-/// `serde_json::Value` on its own produces a schema with no `type`, which MCP
-/// clients cannot render into a form field. A tool's result really can be any
-/// JSON type, so enumerate them rather than pretending it is an object.
-pub fn any_json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({
-        "type": ["object", "array", "string", "number", "boolean", "null"]
-    })
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EffectCert {
     /// The intent this effect executed under. Replays of the same intent
@@ -832,6 +820,17 @@ fn hex_encode(bytes: &[u8]) -> String {
         write!(out, "{byte:02x}").expect("writing to a String cannot fail");
     }
     out
+}
+
+/// JSON Schema for a field that may hold *any* JSON value.
+///
+/// `serde_json::Value` on its own produces a schema with no `type`, which MCP
+/// clients cannot render into a form field. A tool's result really can be any
+/// JSON type, so enumerate them rather than pretending it is an object.
+pub fn any_json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": ["object", "array", "string", "number", "boolean", "null"]
+    })
 }
 
 #[cfg(test)]
