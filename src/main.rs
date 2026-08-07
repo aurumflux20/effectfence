@@ -150,3 +150,22 @@ mod version_sync {
         );
     }
 }
+
+#[cfg(test)]
+mod server_json_sync {
+    /// `server.json` carries its own copy of the version for the MCP
+    /// Registry, and nothing else checks it. It drifted from the package
+    /// version once already, which publishes a listing pointing at a
+    /// release that isn't the current one.
+    #[test]
+    fn server_json_version_matches_cargo_toml() {
+        let raw = include_str!("../server.json");
+        let doc: serde_json::Value = serde_json::from_str(raw).expect("server.json is valid JSON");
+        let pkg = env!("CARGO_PKG_VERSION");
+        assert_eq!(doc["version"], pkg, "server.json .version is out of sync");
+        assert_eq!(
+            doc["packages"][0]["version"], pkg,
+            "server.json .packages[0].version is out of sync"
+        );
+    }
+}
