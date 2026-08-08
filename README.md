@@ -188,6 +188,36 @@ cargo clippy --all-targets
 
 `tests/chaos_test.rs` uses real OS threads to prove the two guarantees separately: a forced same-instant domain race (synchronization deliberately constructed so the collision is guaranteed, not hoped for) admits exactly one winner every time, and 16 concurrent duplicates of one intent admit exactly one execution — with late duplicates replaying the committed cert. A 32-thread stress test additionally asserts sequence numbers are never double-allocated.
 
+## Scan your own MCP server
+
+`tools/fencescan.py` finds tools in an MCP server that could fire the same effect
+twice. No install, no dependencies, no network:
+
+```bash
+python3 tools/fencescan.py /path/to/your-mcp-server
+```
+
+It reports **candidates with evidence** and deliberately renders **no verdict**,
+because an outsider reading a repository usually cannot prove a double-fire —
+the guard often lives in a service the repo calls, or in a sibling SDK, and a
+tool whose name sounds like a write may only return a payload for someone else
+to sign. Output includes an explicit list of what it cannot see.
+
+It was rewritten after hand-verification killed 4 of its first 7 "confirmations".
+Each failure is now a fixed behaviour rather than a caveat:
+
+| It got this wrong | Why | Now |
+|---|---|---|
+| Flagged read-only tools | A flat window after a tool name ran into the *next* tool, so reads inherited writes' vocabulary | Brace-matched to the tool's own block; a read verb in the name vetoes |
+| Said a repo had no idempotency when it had a whole module | `\b(idempot…)` cannot match `deriveIdempotencyKey` — no word boundary before a camelCase capital | Anchors removed; the same blindness hid `requestId`, `clientToken` |
+| Found no writes anywhere | Writes live in shared helpers, not in the tool declaration | Collected per repo as corroboration, never claimed as "this tool writes" |
+| Missed `method: cond ? "POST" : "GET"` | String literals were stripped before matching, deleting the HTTP verb itself | Matched on the raw line |
+| Printed "AT RISK" | That is an accusation, and it was wrong 4 times in 7 | No verdict field exists |
+
+If it flags something in your server and you want a second pair of eyes, open an
+issue — a wrong accusation costs more than a missed one, so a false positive here
+is worth reporting too.
+
 ## Sibling project — `once` (Python)
 
 Same problem, other runtime. [**once**](https://github.com/aurumflux20/once-kernel) (`pip install once-kernel`) is the Python idempotency kernel built on the same idea: a side effect runs exactly once under retries, webhook redelivery, and concurrent workers. It goes further on durability — a Postgres store, heartbeat leases with fence tokens so a stale worker can't resurrect after its lease is reclaimed, and RFC 8785 canonical payload fingerprints.
