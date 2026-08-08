@@ -1,0 +1,5 @@
+# Platform binaries are fetched from the GitHub release at publish time.
+# Committing 25MB of binaries would bloat every clone of this repo forever,
+# and they are already published, checksummed artifacts of a tagged release.
+vendor/
+*.tgz

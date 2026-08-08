@@ -1,0 +1,50 @@
+{
+  "name": "effectfence",
+  "version": "0.1.4",
+  "description": "MCP server that stops agents double-firing side effects. 1,000 racing duplicates, exactly one execution. No Rust toolchain required.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "idempotency",
+    "exactly-once",
+    "agent",
+    "side-effects",
+    "deduplication",
+    "ai-agent"
+  ],
+  "license": "MIT",
+  "author": "A. Kaur (AurumFlux)",
+  "homepage": "https://github.com/aurumflux20/effectfence#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aurumflux20/effectfence.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aurumflux20/effectfence/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "effectfence": "bin/effectfence.js"
+  },
+  "files": [
+    "bin",
+    "vendor",
+    "README.md",
+    "LICENSE"
+  ],
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ],
+  "scripts": {
+    "test": "node test/smoke.mjs"
+  }
+}

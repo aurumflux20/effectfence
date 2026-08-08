@@ -1,0 +1,110 @@
+name: publish npm
+
+# Publishes the `effectfence` npm package -- the launcher that lets people run
+# the MCP server with `npx effectfence`, no Rust toolchain required.
+#
+# The platform binaries are NOT in this repository. They are downloaded here
+# from the tagged GitHub release, which is the same artifact users would get,
+# and each one has already proved it answers an MCP `initialize` on its own
+# native runner (see release.yml). Committing 25MB of binaries would bloat
+# every clone of this repo forever and would let the npm package drift from
+# the release it claims to package.
+#
+# Separate from ci.yml on purpose: CI runs on pull requests, including from
+# forks, and publish rights must never be reachable from a stranger's PR.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag whose binaries to package (e.g. v0.1.4)"
+        required: true
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # OIDC trusted publishing; no npm token exists
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: npm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Fetch the platform binaries from the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p vendor/darwin-arm64 vendor/linux-x64 vendor/linux-arm64 vendor/win32-x64
+          cd vendor
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'effectfence-*' --clobber
+
+          # Checksums are published alongside each artifact. Verify before we
+          # wrap someone else's bytes in a package that carries our name.
+          for f in *.sha256; do
+            sha256sum -c "$f"
+          done
+
+          tar -xzf effectfence-aarch64-apple-darwin.tar.gz       -C darwin-arm64
+          tar -xzf effectfence-x86_64-unknown-linux-gnu.tar.gz   -C linux-x64
+          tar -xzf effectfence-aarch64-unknown-linux-gnu.tar.gz  -C linux-arm64
+          unzip -oq effectfence-x86_64-pc-windows-msvc.zip       -d win32-x64
+          rm -f effectfence-*.tar.gz effectfence-*.zip effectfence-*.sha256
+          chmod +x darwin-arm64/effectfence linux-x64/effectfence linux-arm64/effectfence
+          ls -laR .
+
+      - name: Every platform binary must be present
+        run: |
+          set -euo pipefail
+          for p in vendor/darwin-arm64/effectfence vendor/linux-x64/effectfence \
+                   vendor/linux-arm64/effectfence vendor/win32-x64/effectfence.exe; do
+            test -s "$p" || { echo "missing or empty: $p" >&2; exit 1; }
+          done
+          echo "all four platform binaries present"
+
+      # The runner is linux-x64, so this exercises the launcher's real
+      # resolution path and starts an actual server -- not a mock.
+      - name: Smoke test the launcher on this platform
+        run: node test/smoke.mjs
+
+      - name: Package version must match the release tag
+        env:
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "${TAG#v}" != "$PKG" ]; then
+            echo "release ${TAG} does not match npm package version ${PKG}" >&2
+            exit 1
+          fi
+          echo "release and package.json agree on $PKG"
+
+      - name: Publish
+        run: npm publish --access public
+
+      - name: Verify it resolves from the registry
+        run: |
+          set -euo pipefail
+          PKG="$(node -p "require('./package.json').version")"
+          for i in 1 2 3 4 5 6; do
+            if npm view "effectfence@$PKG" version >/dev/null 2>&1; then
+              echo "effectfence@$PKG is live"
+              exit 0
+            fi
+            echo "not visible yet ($i/6)"
+            sleep 10
+          done
+          echo "published but not resolvable after 60s" >&2
+          exit 1
