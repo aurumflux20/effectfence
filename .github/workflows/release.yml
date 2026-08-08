@@ -92,8 +92,17 @@ jobs:
           Compress-Archive -Path "target\${{ matrix.target }}\release\effectfence.exe" `
             -DestinationPath "effectfence-${{ matrix.target }}.zip"
           $h = (Get-FileHash "effectfence-${{ matrix.target }}.zip" -Algorithm SHA256).Hash.ToLower()
-          "$h  effectfence-${{ matrix.target }}.zip" |
-            Out-File -Encoding ascii "effectfence-${{ matrix.target }}.zip.sha256"
+          # Write LF, not CRLF. Out-File would emit Windows line endings, and
+          # then `shasum -c` / `sha256sum -c` on Linux or macOS reads the
+          # filename as "...zip\r", cannot find it, and reports FAILED -- which
+          # looks exactly like a tampered download to anyone checking. The hash
+          # itself was always correct; the file was unusable by the tools people
+          # actually verify with.
+          $line = "$h  effectfence-${{ matrix.target }}.zip`n"
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "effectfence-${{ matrix.target }}.zip.sha256"),
+            $line,
+            (New-Object System.Text.UTF8Encoding $false))
 
       - uses: actions/upload-artifact@v4
         with:
