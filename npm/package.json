@@ -1,6 +1,6 @@
 {
   "name": "effectfence",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "MCP server that stops agents double-firing side effects. 1,000 racing duplicates, exactly one execution. No Rust toolchain required.",
   "keywords": [
     "mcp",
@@ -46,5 +46,6 @@
   ],
   "scripts": {
     "test": "node test/smoke.mjs"
-  }
+  },
+  "mcpName": "io.github.aurumflux20/effectfence"
 }
