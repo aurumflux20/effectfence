@@ -3,13 +3,19 @@ name: Release binaries
 # Prebuilt binaries so nobody needs a Rust toolchain to run the MCP server --
 # including directory build sandboxes (Glama), which have no C linker and would
 # otherwise have to compile tokio + rmcp from source inside a timeout.
+#
+# Five targets, each built on its NATIVE runner. Cross-compiling would be fewer
+# jobs, but a cross-built binary that has never executed is not evidence that it
+# runs -- and "we shipped a Mac binary that segfaults" is a worse outcome than a
+# slower matrix. Every job below actually starts its own binary and makes it
+# answer an MCP `initialize` before that binary is allowed near a release.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build and attach to (e.g. v0.1.3)"
+        description: "Tag to build and attach to (e.g. v0.1.5)"
         required: true
 
 permissions:
@@ -17,33 +23,102 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build release binary
-        run: cargo build --release --bin effectfence
+      - name: Install the Rust target
+        run: rustup target add ${{ matrix.target }}
 
-      - name: Prove the binary answers MCP introspection
+      - name: Build
+        run: cargo build --release --bin effectfence --target ${{ matrix.target }}
+
+      # The binary must prove it works on the platform it was built for.
+      # `grep -q` is the verdict here because it sets an exit code -- the step
+      # fails the job if the response is wrong, rather than printing something
+      # that looks fine and moving on.
+      - name: Prove the binary answers MCP introspection (unix)
+        if: runner.os != 'Windows'
         run: |
+          set -euo pipefail
           printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
-            | ./target/release/effectfence | tee out.json
+            | ./target/${{ matrix.target }}/release/effectfence | tee out.json
           grep -q '"serverInfo"' out.json
           grep -q 'effectfence' out.json
 
-      - name: Package
+      - name: Prove the binary answers MCP introspection (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          tar -czf effectfence-x86_64-unknown-linux-gnu.tar.gz -C target/release effectfence
-          sha256sum effectfence-x86_64-unknown-linux-gnu.tar.gz > effectfence-x86_64-unknown-linux-gnu.tar.gz.sha256
+          $req = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}'
+          $out = $req | & ".\target\${{ matrix.target }}\release\effectfence.exe"
+          $out | Out-File -Encoding utf8 out.json
+          if ($out -notmatch '"serverInfo"') { throw "no serverInfo in initialize response" }
+          if ($out -notmatch 'effectfence')  { throw "server did not identify as effectfence" }
 
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          tar -czf effectfence-${{ matrix.target }}.tar.gz \
+            -C target/${{ matrix.target }}/release effectfence
+          shasum -a 256 effectfence-${{ matrix.target }}.tar.gz \
+            > effectfence-${{ matrix.target }}.tar.gz.sha256
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "target\${{ matrix.target }}\release\effectfence.exe" `
+            -DestinationPath "effectfence-${{ matrix.target }}.zip"
+          $h = (Get-FileHash "effectfence-${{ matrix.target }}.zip" -Algorithm SHA256).Hash.ToLower()
+          "$h  effectfence-${{ matrix.target }}.zip" |
+            Out-File -Encoding ascii "effectfence-${{ matrix.target }}.zip.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: effectfence-${{ matrix.target }}
+          path: |
+            effectfence-${{ matrix.target }}.tar.gz*
+            effectfence-${{ matrix.target }}.zip*
+          if-no-files-found: error
+
+  publish:
+    name: attach every platform to the release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # The release is only created once every single target has built AND
+      # proved itself. A partial release is worse than none: an npm package
+      # that resolves to a missing asset fails at install time, for the user.
       - name: Publish to the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
+          set -euo pipefail
+          ls -la artifacts
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "Prebuilt Linux binary for the EffectFence MCP server. No Rust toolchain required."
-          gh release upload "$TAG" \
-            effectfence-x86_64-unknown-linux-gnu.tar.gz \
-            effectfence-x86_64-unknown-linux-gnu.tar.gz.sha256 \
-            --repo "$GITHUB_REPOSITORY" --clobber
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" \
+                 --notes "Prebuilt EffectFence MCP server binaries for Linux (x64, arm64), macOS (Apple silicon, Intel) and Windows (x64). No Rust toolchain required. Each binary answered an MCP \`initialize\` on its own platform before being attached."
+          gh release upload "$TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
