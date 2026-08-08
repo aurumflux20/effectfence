@@ -224,6 +224,15 @@ Same problem, other runtime. [**once**](https://github.com/aurumflux20/once-kern
 
 Use EffectFence when your fence lives in Rust or in front of an MCP server; use `once` when the side effect is Python and you want a durable store. `effectfence wrap` has been proven fencing `once`'s own MCP server.
 
+## Commercial support
+
+The libraries are free and stay free. If you want help applying them to a
+codebase that already moves money — a fixed-scope audit of every side-effecting
+path, storm-tested, with a CI test that keeps it fenced — see
+[SUPPORT.md](SUPPORT.md) or email **hello@aurumflux.co**.
+
+If it isn't a fit we'll say so.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
