@@ -4,11 +4,18 @@ name: Release binaries
 # including directory build sandboxes (Glama), which have no C linker and would
 # otherwise have to compile tokio + rmcp from source inside a timeout.
 #
-# Five targets, each built on its NATIVE runner. Cross-compiling would be fewer
+# Four targets, each built on its NATIVE runner. Cross-compiling would be fewer
 # jobs, but a cross-built binary that has never executed is not evidence that it
 # runs -- and "we shipped a Mac binary that segfaults" is a worse outcome than a
 # slower matrix. Every job below actually starts its own binary and makes it
 # answer an MCP `initialize` before that binary is allowed near a release.
+#
+# Intel macOS (x86_64-apple-darwin) is deliberately NOT built. GitHub has
+# retired the macos-13 runners, and the only alternative is cross-compiling on
+# Apple silicon -- which would produce a binary that has never once executed.
+# Shipping an untested binary contradicts the rule above, and a broken download
+# costs more trust than a missing one. Apple silicon covers the large majority
+# of Mac developers; revisit if anyone actually asks for Intel.
 on:
   push:
     tags: ["v*"]
@@ -35,8 +42,6 @@ jobs:
             target: aarch64-unknown-linux-gnu
           - os: macos-14
             target: aarch64-apple-darwin
-          - os: macos-13
-            target: x86_64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     steps:
@@ -120,5 +125,5 @@ jobs:
           ls -la artifacts
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" \
-                 --notes "Prebuilt EffectFence MCP server binaries for Linux (x64, arm64), macOS (Apple silicon, Intel) and Windows (x64). No Rust toolchain required. Each binary answered an MCP \`initialize\` on its own platform before being attached."
+                 --notes "Prebuilt EffectFence MCP server binaries for Linux (x64, arm64), macOS (Apple silicon) and Windows (x64). No Rust toolchain required. Each binary answered an MCP \`initialize\` on its own platform before being attached."
           gh release upload "$TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
