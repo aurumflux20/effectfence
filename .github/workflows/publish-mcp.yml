@@ -1,8 +1,13 @@
 name: Publish to MCP Registry
 
+# NOT triggered by the tag push. The registry validates that every package it
+# lists actually EXISTS at the stated version -- and on a tag push, npm and
+# crates.io have not been published yet, so it fails with a 404 on our own
+# package. Ordering matters: publish the packages first, then register them.
+#
+# Run this by hand (or let the npm publish workflow finish) once
+# `npm view effectfence@X` and `cargo search effectfence` both show the version.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 jobs:
