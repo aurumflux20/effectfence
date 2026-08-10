@@ -6,6 +6,11 @@ and MIT/Apache licensed. Use them, fork them, ship them — no strings.
 Some teams want help applying them to a codebase that already has money moving
 through it. That is what we do.
 
+The one-sentence version of what you get: **done means done on your sends** —
+"success" is only spoken after the operation is admitted exactly once and
+receipted, never on a self-report. We run this on our own production mail
+path; the audit wires the same discipline into yours.
+
 ## The Fence Audit — 5 working days, fixed scope
 
 **Day 1 — Inventory.** Every side-effecting call in your codebase: what fires,
