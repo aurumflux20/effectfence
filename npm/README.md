@@ -37,6 +37,32 @@ guarantee is enforced under real contention, not assumed:
 - Simultaneity is **forced** with a real barrier, not produced by spawning
   threads quickly and hoping the scheduler cooperates.
 
+## Scope — read this before you rely on it
+
+**This is an in-memory, single-process fence. Its state lives in this server
+process and is lost when the process restarts.**
+
+That is enough to close races and duplicates between concurrent threads, tasks
+and agents that share **one** running server. It is not enough for:
+
+- **Two instances of this server.** Each has its own state, so the same intent
+  can execute once per instance. A horizontally scaled or load-balanced
+  deployment does not get exactly-once from this package.
+- **A restart mid-flight.** State is not persisted. An intent admitted before a
+  restart is unknown to the process that comes back.
+- **An agent that bypasses the fence.** It protects effects routed *through* it;
+  it cannot stop a caller that holds the credential and calls the provider
+  directly. Deploy it at the one choke point your agents actually share.
+
+If you need the guarantee to survive a restart or span processes, you need a
+shared store behind it — see [`once-kernel`](https://www.npmjs.com/package/once-kernel)
+(Python, Postgres-backed, heartbeat leases and fence tokens) or
+[`seal`](https://github.com/aurumflux20/seal), which does cross-process
+admission and confirms the result against the payment provider's own records.
+
+We state this here rather than only in the source repo because the limit is the
+part you need *before* you deploy, not after.
+
 ## Platforms
 
 | Platform | Included |
