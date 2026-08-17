@@ -40,6 +40,15 @@ jobs:
           node-version: "22.x"
           registry-url: "https://registry.npmjs.org"
 
+      # Trusted publishing needs npm 11.5.1+. Node 22.x can bundle an older
+      # npm depending on the runner's patch release, and an outdated npm falls
+      # back to a bogus token-auth attempt instead of the OIDC exchange -- the
+      # 404 that produces reads like "package not found" but actually means
+      # "authenticated as nobody". Same fix already applied to fencescan and
+      # once-kernel-ts; this workflow predates it and had never been run.
+      - run: npm install -g npm@latest
+      - run: npm --version
+
       - name: Fetch the platform binaries from the release
         env:
           GH_TOKEN: ${{ github.token }}
