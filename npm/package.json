@@ -1,6 +1,6 @@
 {
   "name": "effectfence",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "MCP server that stops agents double-firing side effects within one process. 1,000 racing duplicates, exactly one execution. In-memory and single-process by design \u2014 see Scope. No Rust toolchain required.",
   "keywords": [
     "mcp",
