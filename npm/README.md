@@ -8,6 +8,29 @@ npx effectfence wrap -- npx -y your-mcp-server
 
 No Rust toolchain. No build step. No install-time downloads.
 
+## Prove your stack double-fires first
+
+Don't take our word for it — check your own server. `probe` fires N byte-identical
+calls at one tool **concurrently** (the twin-caller race) and counts distinct effects:
+
+```bash
+npx effectfence probe --tool charge_card --args '{"amount":4900}' --calls 12 -- npx -y your-mcp-server
+```
+
+```text
+  identical calls   : 12
+  DISTINCT effects  : 12
+  PROVEN DOUBLE-FIRE — 12 identical calls, 12 different results.
+```
+
+Then re-run it through the fence and watch `DISTINCT effects` drop to `1`:
+
+```bash
+npx effectfence probe --tool charge_card --args '{"amount":4900}' --calls 12 -- npx effectfence wrap -- npx -y your-mcp-server
+```
+
+The footprints, then the lock — in two commands.
+
 ## Wrap a server you already run (start here)
 
 EffectFence stands **in front of** an existing MCP server and fences every tool call

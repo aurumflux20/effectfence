@@ -131,7 +131,7 @@ impl EffectFenceServer {
 
 #[tool_handler(
     name = "effectfence",
-    version = "0.1.6", // KEEP IN SYNC with Cargo.toml -- the macro rejects env!(); test below enforces it
+    version = "0.1.7", // KEEP IN SYNC with Cargo.toml -- the macro rejects env!(); test below enforces it
     instructions = "Causal effect fencing for multi-agent tool calls. Before any side-effecting tool call (charging, sending, provisioning), call fence_prepare with a stable `intent` id for the action; run the tool only on {status:'fresh'}, then report the outcome with fence_commit (success) or fence_abort (failure). Duplicates of a completed action get its recorded cert back instead of running again, and concurrent attempts at the same action are serialized to exactly one winner."
 )]
 impl ServerHandler for EffectFenceServer {}
@@ -147,6 +147,10 @@ async fn main() -> Result<()> {
             .cloned()
             .collect();
         return effectfence::wrap::run_wrap(child).await;
+    }
+    if args.len() >= 2 && args[1] == "probe" {
+        // `effectfence probe --tool <name> [--args '<json>'] [--calls N] -- <command> [args...]`
+        return effectfence::probe::run_probe(args[2..].to_vec()).await;
     }
     let service = EffectFenceServer::default().serve(stdio()).await?;
     service.waiting().await?;

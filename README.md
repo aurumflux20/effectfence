@@ -151,6 +151,43 @@ match prepare_effect_fence(&fence, req)? {
 
 A concurrent duplicate of the same intent gets `Err(FenceError::IntentInFlight)`; a same-instant race on the domain gets `Err(FenceError::DomainRace)`; either way it must not run the effect.
 
+## First: does YOUR stack actually double-fire? (probe it)
+
+Before you install a fence, prove you need one — on your own server, not our demo.
+`probe` is a bare MCP client. Point it at any MCP server, and it fires N
+byte-identical calls at one tool **concurrently** — the twin-caller race that
+happens the instant two agents reach for the same action — then reports how many
+*distinct* effects actually landed:
+
+```bash
+effectfence probe --tool charge_card --args '{"amount":4900}' --calls 12 -- npx -y @your-org/your-mcp-server
+```
+
+```text
+EffectFence probe — twin-caller race report
+--------------------------------------------
+  identical calls   : 12
+  DISTINCT effects  : 12
+
+  PROVEN DOUBLE-FIRE. 12 byte-identical calls produced 12 DIFFERENT
+  results. Each distinct result is a separate real execution of one
+  intended action — the duplicate side effect you cannot take back.
+```
+
+It fires **only** the one tool you name, with the exact arguments you supply — it
+never enumerates and hammers a server blindly. And it is honest about what it can
+see: distinct results are undeniable proof of double-execution; identical results
+are reported as *inconclusive from the response*, never as a zero it can't prove.
+
+Then re-run the same probe **through the fence** and watch `DISTINCT effects` drop
+to `1`:
+
+```bash
+effectfence probe --tool charge_card --args '{"amount":4900}' --calls 12 -- effectfence wrap -- npx -y @your-org/your-mcp-server
+```
+
+That is the whole pitch in two commands: the footprints, then the lock.
+
 ## Quickstart: wrap an existing MCP server (start here)
 
 The fastest way to use EffectFence is to put it **in front of a tool server you
