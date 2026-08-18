@@ -26,6 +26,43 @@ Run the attack yourself:
 cargo run --release --example storm
 ```
 
+## The multi-agent turf war
+
+The storm above is one action, many racers. The harder case is *different*
+agents making *contradictory* decisions on the same production resource — the
+coordination failure now reported across production multi-agent systems (~a
+third of 2026 multi-agent incidents). Three autonomous SRE agents react to one
+latency spike:
+
+```bash
+cargo run --example turf_war
+```
+
+```
+Agent A (autoscaler): scale node pool UP
+  ADMITTED. Fence leased cluster:prod-us-east-1 — executing kubectl scale up.
+  DONE. EffectCert minted — verify() -> true
+
+Agent B (cost-optimizer): scale the same pool DOWN
+  REFUSED before kubectl ran:
+     read-set for `metrics:prod-us-east-1` is stale: B decided on seq 0, world is at seq 1.
+
+Agent C (deploy-bot): roll the deployment BACK
+  C's causal view is concurrent with A's: true
+  -> escalated to a human instead of corrupting the cluster.
+
+  Actions proposed: 3   executed: 1   cluster: intended, not corrupted.
+```
+
+Each agent was individually correct for the state it read. Run concurrently
+without coordination, all three `kubectl` calls fire and the cluster ends in a
+state none of them intended — the $100M outage. The fence lets exactly one act,
+refuses the other two *before* their side effect runs, and tells each one why.
+
+Nothing above is mocked — every call is the real crate API.
+
+
+
 EffectFence is a causal concurrency fence for multi-agent tool calls. When more than one agent (or retry, or re-dispatch) can end up trying to run the same side-effecting operation — charge a card, send a payout, provision a resource — EffectFence guarantees exactly one attempt ever executes it: same-instant races are decided by an atomic compare-exchange reservation, and late duplicates get the recorded outcome replayed instead of running again. Every effect that does run gets a content-addressed certificate chained to whatever it was causally built on.
 
 It ships as a Rust library (`effectfence::fence`) and as a stdio [MCP](https://modelcontextprotocol.io) server exposing three tools — `fence_prepare`, `fence_commit`, `fence_abort` — so agents can route side-effecting tool calls through the fence instead of racing each other directly.
