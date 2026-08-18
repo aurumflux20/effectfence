@@ -276,6 +276,77 @@ struct Inner {
     /// failed. This is what stops a *later* duplicate, not just a
     /// same-instant race.
     intents: Mutex<HashMap<String, IntentState>>,
+    /// Since-boot outcome tallies. Atomics rather than a mutex'd struct so
+    /// counting never contends with the admission path it is counting.
+    counters: Counters,
+}
+
+/// Since-boot tallies of what the fence decided. Every admission attempt
+/// lands in exactly one bucket, so `admitted + replayed + refused_* ` is the
+/// total number of attempts the fence has seen.
+#[derive(Debug, Default)]
+struct Counters {
+    admitted: AtomicU64,
+    replayed: AtomicU64,
+    refused_stale: AtomicU64,
+    refused_race: AtomicU64,
+    refused_inflight: AtomicU64,
+    refused_failed: AtomicU64,
+}
+
+/// A snapshot of [`EffectFence::stats`] — what the fence has decided since
+/// this process started.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default,
+)]
+pub struct FenceStats {
+    /// Attempts that won a fresh ticket and were allowed to execute.
+    pub admitted: u64,
+    /// Duplicate attempts handed a recorded certificate instead of running.
+    pub replayed: u64,
+    /// Refused: the decision cited a read-set entry the world moved past.
+    pub refused_stale: u64,
+    /// Refused: lost the atomic race for the domain's next sequence.
+    pub refused_race: u64,
+    /// Refused: another attempt at this intent is executing right now.
+    pub refused_inflight: u64,
+    /// Refused: a prior attempt failed with an unknown outcome; fenced
+    /// until reconciled.
+    pub refused_failed: u64,
+}
+
+impl FenceStats {
+    /// Total admission attempts seen since boot.
+    pub fn total(&self) -> u64 {
+        self.admitted
+            + self.replayed
+            + self.refused_stale
+            + self.refused_race
+            + self.refused_inflight
+            + self.refused_failed
+    }
+
+    /// Every attempt that did NOT run the effect: replays plus refusals.
+    /// This is the number that answers "what did the fence actually stop?"
+    pub fn prevented(&self) -> u64 {
+        self.total() - self.admitted
+    }
+
+    /// One line for a log or a status endpoint.
+    pub fn log_line(&self) -> String {
+        format!(
+            "effectfence since boot: admitted={} replayed={} refused(stale={} race={} \
+in-flight={} failed={}) total={} prevented={}",
+            self.admitted,
+            self.replayed,
+            self.refused_stale,
+            self.refused_race,
+            self.refused_inflight,
+            self.refused_failed,
+            self.total(),
+            self.prevented()
+        )
+    }
 }
 
 /// The fence: per-domain sequence counters plus the intent ledger.
@@ -306,7 +377,22 @@ impl EffectFence {
                 config,
                 domains: Mutex::new(HashMap::new()),
                 intents: Mutex::new(HashMap::new()),
+                counters: Counters::default(),
             }),
+        }
+    }
+
+    /// What this fence has decided since the process started. Cheap:
+    /// relaxed atomic loads, no locks taken.
+    pub fn stats(&self) -> FenceStats {
+        let c = &self.inner.counters;
+        FenceStats {
+            admitted: c.admitted.load(Ordering::Relaxed),
+            replayed: c.replayed.load(Ordering::Relaxed),
+            refused_stale: c.refused_stale.load(Ordering::Relaxed),
+            refused_race: c.refused_race.load(Ordering::Relaxed),
+            refused_inflight: c.refused_inflight.load(Ordering::Relaxed),
+            refused_failed: c.refused_failed.load(Ordering::Relaxed),
         }
     }
 
@@ -673,18 +759,33 @@ pub fn prepare_effect_fence(
             Some(IntentState::Done { cert, recorded_at })
                 if now.saturating_duration_since(*recorded_at) < config.result_ttl =>
             {
+                fence
+                    .inner
+                    .counters
+                    .replayed
+                    .fetch_add(1, Ordering::Relaxed);
                 return Ok(Admission::Replay(cert.clone()));
             }
             Some(IntentState::Failed {
                 reason,
                 recorded_at,
             }) if now.saturating_duration_since(*recorded_at) < config.result_ttl => {
+                fence
+                    .inner
+                    .counters
+                    .refused_failed
+                    .fetch_add(1, Ordering::Relaxed);
                 return Err(FenceError::IntentFailed {
                     intent: req.intent.clone(),
                     reason: reason.to_string(),
                 });
             }
             Some(IntentState::InFlight { lease_expires_at }) if now < *lease_expires_at => {
+                fence
+                    .inner
+                    .counters
+                    .refused_inflight
+                    .fetch_add(1, Ordering::Relaxed);
                 return Err(FenceError::IntentInFlight {
                     intent: req.intent.clone(),
                 });
@@ -706,6 +807,11 @@ pub fn prepare_effect_fence(
         let actual = fence.current(&entry.domain);
         if actual != entry.seq {
             fence.release_intent(&req.intent);
+            fence
+                .inner
+                .counters
+                .refused_stale
+                .fetch_add(1, Ordering::Relaxed);
             return Err(FenceError::ReadSetStale {
                 domain: entry.domain.clone(),
                 expected: entry.seq,
@@ -721,6 +827,11 @@ pub fn prepare_effect_fence(
         Ok(seq) => seq,
         Err(actual) => {
             fence.release_intent(&req.intent);
+            fence
+                .inner
+                .counters
+                .refused_race
+                .fetch_add(1, Ordering::Relaxed);
             return Err(FenceError::DomainRace {
                 domain: req.domain.clone(),
                 expected: expected_seq,
@@ -732,6 +843,11 @@ pub fn prepare_effect_fence(
     let mut vector_clock = req.known_clock;
     vector_clock.tick(&req.agent);
 
+    fence
+        .inner
+        .counters
+        .admitted
+        .fetch_add(1, Ordering::Relaxed);
     Ok(Admission::Fresh(PreparedEffect {
         intent: req.intent,
         parent: req.parent,
@@ -778,6 +894,11 @@ pub fn commit_effect_cert(
                     recorded_at: Instant::now(),
                 },
             );
+            fence
+                .inner
+                .counters
+                .refused_stale
+                .fetch_add(1, Ordering::Relaxed);
             return Err(FenceError::ReadSetStale {
                 domain: entry.domain.clone(),
                 expected: entry.seq,
@@ -1249,6 +1370,93 @@ mod schema_contract {
             args["type"],
             serde_json::json!(["object", "null"]),
             "args must be a nullable object so clients can render it"
+        );
+    }
+}
+
+#[cfg(test)]
+mod stats_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn req(intent: &str, domain: &str, read_set: Vec<ReadSetEntry>) -> EffectRequest {
+        EffectRequest {
+            intent: intent.into(),
+            parent: None,
+            domain: domain.into(),
+            tool: "t".into(),
+            args: json!({}),
+            read_set,
+            agent: "a".into(),
+            known_clock: VectorClock::new(),
+        }
+    }
+
+    #[test]
+    fn every_outcome_lands_in_exactly_one_bucket() {
+        let f = EffectFence::new();
+        assert_eq!(f.stats().total(), 0, "a fresh fence has seen nothing");
+
+        // 1. admitted
+        let p = match prepare_effect_fence(&f, req("i1", "d1", vec![])).unwrap() {
+            Admission::Fresh(p) => p,
+            _ => panic!("expected fresh"),
+        };
+        commit_effect_cert(&f, p, json!({})).unwrap();
+        assert_eq!(f.stats().admitted, 1);
+
+        // 2. replayed — same intent again
+        match prepare_effect_fence(&f, req("i1", "d1", vec![])).unwrap() {
+            Admission::Replay(_) => {}
+            _ => panic!("expected replay"),
+        }
+        assert_eq!(f.stats().replayed, 1);
+
+        // 3. refused_stale — cite a read-set seq the world moved past
+        let _ = f.reserve("obs", 0); // obs: 0 -> 1
+        let e = prepare_effect_fence(&f, req("i2", "d2", vec![ReadSetEntry::new("obs", 0)]))
+            .unwrap_err();
+        assert!(matches!(e, FenceError::ReadSetStale { .. }));
+        assert_eq!(f.stats().refused_stale, 1);
+
+        let s = f.stats();
+        assert_eq!(s.total(), 3, "three attempts seen");
+        assert_eq!(s.prevented(), 2, "replay + stale = 2 effects not run");
+        assert!(s.log_line().contains("admitted=1"), "{}", s.log_line());
+    }
+
+    #[test]
+    fn counters_are_accurate_under_real_concurrency() {
+        use std::sync::Arc as StdArc;
+        use std::thread;
+
+        let f = EffectFence::new();
+        let barrier = StdArc::new(std::sync::Barrier::new(16));
+        let mut handles = vec![];
+
+        // 16 threads race the SAME intent: exactly one may be admitted.
+        for _ in 0..16 {
+            let f = f.clone();
+            let b = StdArc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                b.wait();
+                prepare_effect_fence(&f, req("same", "dom", vec![]))
+            }));
+        }
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let fresh = results
+            .iter()
+            .filter(|r| matches!(r, Ok(Admission::Fresh(_))))
+            .count();
+
+        let s = f.stats();
+        assert_eq!(fresh, 1, "exactly one attempt may win");
+        assert_eq!(s.admitted, 1, "counter must agree with reality");
+        assert_eq!(
+            s.total(),
+            16,
+            "every attempt counted exactly once: {}",
+            s.log_line()
         );
     }
 }

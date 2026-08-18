@@ -3,12 +3,68 @@
 **MCP server that stops agents double-firing side effects. 1,000 racing duplicates, exactly one execution — proven on every commit.**
 
 ```bash
-npx effectfence
+npx effectfence wrap -- npx -y your-mcp-server
 ```
 
 No Rust toolchain. No build step. No install-time downloads.
 
-## Add it to your MCP client
+## Wrap a server you already run (start here)
+
+EffectFence stands **in front of** an existing MCP server and fences every tool call
+automatically — no changes to your agent, no remembering to call anything:
+
+```text
+agent/client ──MCP──> effectfence wrap ──MCP──> your real tool server
+```
+
+The tool list is mirrored 1:1 (same names, schemas, docs). What changes: identical
+duplicate calls — same tool, same arguments — execute the child **once**; later
+duplicates get the recorded result replayed instead of firing again.
+
+### One-paste recipe: fence a cluster-mutating server
+
+The case this exists for — several agents holding `kubectl` on the same cluster.
+
+**Claude Code:**
+
+```bash
+claude mcp add k8s-fenced -- npx -y effectfence wrap -- npx -y kubernetes-mcp-server
+```
+
+**Cursor** (`~/.cursor/mcp.json`) **or Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "k8s-fenced": {
+      "command": "npx",
+      "args": ["-y", "effectfence", "wrap", "--", "npx", "-y", "kubernetes-mcp-server"]
+    }
+  }
+}
+```
+
+Swap in whichever server holds your write-bearing tools — cloud APIs, deploy tooling,
+a payments server. Point every agent at the fenced name and remove access to the raw
+one; a fence only works if it is the only door.
+
+### See what it stopped
+
+Call the `fence_stats` tool (no arguments) for live counters since the process
+started:
+
+```
+effectfence since boot: admitted=1 replayed=995 refused(stale=0 race=4 in-flight=0 failed=0) total=1000 prevented=999
+```
+
+`prevented` is every attempt that did **not** run the effect — the duplicate
+executions that never happened.
+
+## Explicit fencing (without wrap)
+
+If you want agents to fence deliberately instead — richer control via `read_set`,
+`parent`, and `known_clock` — run the server bare and call `fence_prepare` /
+`fence_commit` / `fence_abort` yourself:
 
 ```json
 {

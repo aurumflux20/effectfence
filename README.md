@@ -151,7 +151,76 @@ match prepare_effect_fence(&fence, req)? {
 
 A concurrent duplicate of the same intent gets `Err(FenceError::IntentInFlight)`; a same-instant race on the domain gets `Err(FenceError::DomainRace)`; either way it must not run the effect.
 
-## Quickstart: MCP server
+## Quickstart: wrap an existing MCP server (start here)
+
+The fastest way to use EffectFence is to put it **in front of a tool server you
+already run**. Agents don't have to remember to call anything — every tool call is
+fenced automatically:
+
+```text
+agent/client ──MCP──> effectfence wrap ──MCP──> your real tool server
+```
+
+```bash
+cargo install effectfence
+```
+
+Then wrap whatever server owns your dangerous tools:
+
+```bash
+effectfence wrap -- npx -y @your-org/your-mcp-server
+```
+
+The tool list is mirrored 1:1 from the child (same names, schemas, docs), so nothing
+in your agent changes. What changes: identical duplicate calls — same tool, same
+arguments — execute the child **once**; later duplicates get the recorded result
+replayed, and concurrent identical calls are refused rather than double-firing.
+
+### One-paste recipe: fence a cluster-mutating server
+
+The case this exists for — several agents with `kubectl` on the same cluster.
+
+**Claude Code:**
+
+```bash
+claude mcp add k8s-fenced -- effectfence wrap -- npx -y kubernetes-mcp-server
+```
+
+**Cursor** (`~/.cursor/mcp.json`) **or Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "k8s-fenced": {
+      "command": "effectfence",
+      "args": ["wrap", "--", "npx", "-y", "kubernetes-mcp-server"]
+    }
+  }
+}
+```
+
+Swap `kubernetes-mcp-server` for whichever server holds your write-bearing tools —
+cloud APIs, deploy tooling, a payments server. Point every agent at the fenced name
+and remove their access to the raw one; the fence is only a fence if it is the only
+door.
+
+Watch it work with `fence_stats` (see below) — `replayed` and `refused` are the
+duplicate executions that did not happen.
+
+### Honest scope of wrap
+
+Tools only for now (no resource/prompt passthrough). Intent is derived from
+`hash(tool + canonical args)`, so **byte-identical** arguments are treated as the same
+action — an agent that varies a timestamp in its arguments defeats dedup, and that
+direction fails *safe*: the call runs, nothing is corrupted. State is in-memory per
+wrap process; run one fenced gateway per set of production-mutating tools.
+
+---
+
+## Quickstart: MCP server (explicit fencing)
+
+Use this when you want agents to fence deliberately — richer control (`read_set`,
+`parent`, `known_clock`) than `wrap` derives automatically.
 
 Listed in the [official MCP Registry](https://registry.modelcontextprotocol.io) as
 `mcp-name: io.github.aurumflux20/effectfence`
@@ -213,6 +282,15 @@ It exposes:
 - **`fence_prepare`** — `{ intent, domain, tool, args, agent, read_set?, parent?, known_clock? }` → `{status: "fresh", prepared}` when this attempt wins (run the tool, then report back), or `{status: "already_done", cert}` when this exact action already ran (use the recorded result — do NOT run the tool). Errors mean do not run.
 - **`fence_commit`** — `{ prepared, result }` → `{status: "committed", cert}`. Later duplicates of the intent now replay this cert.
 - **`fence_abort`** — `{ prepared, reason }` → `{status: "aborted"}`. The intent stays fenced until reconciled and cleared.
+- **`fence_stats`** — no arguments → live counters since the process started:
+  `admitted` (effects that ran), `replayed` (duplicates handed a recorded result),
+  `refused` broken out by cause (`stale_read_set`, `domain_race`, `in_flight`,
+  `prior_failure`), plus `total_attempts` and `prevented`. `prevented` is the number
+  that matters: every attempt that did **not** run the effect.
+
+  ```
+  effectfence since boot: admitted=1 replayed=995 refused(stale=0 race=4 in-flight=0 failed=0) total=1000 prevented=999
+  ```
 
 Tool input schemas are generated automatically from the Rust types (via `schemars`), so any MCP client can introspect them with `tools/list`.
 

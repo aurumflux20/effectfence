@@ -107,6 +107,26 @@ impl EffectFenceServer {
         abort_effect(&self.fence, args.prepared, args.reason);
         json_result(serde_json::json!({"status": "aborted", "intent": intent}))
     }
+
+    #[tool(
+        description = "Live counters since this fence process started: how many effects were admitted (ran), replayed (duplicate handed a recorded result), and refused (stale read-set, lost domain race, already in flight, or fenced after an unknown-outcome failure). `prevented` is every attempt that did NOT run the effect. Takes no arguments."
+    )]
+    async fn fence_stats(&self) -> Result<CallToolResult, McpError> {
+        let s = self.fence.stats();
+        json_result(serde_json::json!({
+            "admitted": s.admitted,
+            "replayed": s.replayed,
+            "refused": {
+                "stale_read_set": s.refused_stale,
+                "domain_race": s.refused_race,
+                "in_flight": s.refused_inflight,
+                "prior_failure": s.refused_failed,
+            },
+            "total_attempts": s.total(),
+            "prevented": s.prevented(),
+            "log_line": s.log_line(),
+        }))
+    }
 }
 
 #[tool_handler(
