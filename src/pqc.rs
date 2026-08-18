@@ -30,7 +30,7 @@
 //! implementation.
 
 use fips204::ml_dsa_65;
-use fips204::traits::{KeyGen, SerDes, Signer, Verifier};
+use fips204::traits::{SerDes, Signer, Verifier};
 
 use crate::fence::EffectCert;
 
@@ -102,8 +102,10 @@ pub fn verify(cert: &EffectCert, sig: &CertSignature, public_key_bytes: &[u8]) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fence::{EffectFence, EffectRequest, VectorClock, Admission,
-                       prepare_effect_fence, commit_effect_cert};
+    use crate::fence::{
+        Admission, EffectFence, EffectRequest, VectorClock, commit_effect_cert,
+        prepare_effect_fence,
+    };
     use serde_json::json;
 
     fn one_cert() -> EffectCert {

@@ -19,8 +19,8 @@
 //! why, and handed the safe next move.
 
 use effectfence::fence::{
-    EffectFence, EffectRequest, ReadSetEntry, VectorClock, Admission, FenceError,
-    prepare_effect_fence, commit_effect_cert,
+    Admission, EffectFence, EffectRequest, FenceError, ReadSetEntry, VectorClock,
+    commit_effect_cert, prepare_effect_fence,
 };
 use serde_json::json;
 
@@ -63,12 +63,18 @@ fn main() {
 
     match prepare_effect_fence(&fence, req_a) {
         Ok(Admission::Fresh(prepared)) => {
-            println!("  ADMITTED. Fence leased {} — executing kubectl scale up.", cluster_domain);
+            println!(
+                "  ADMITTED. Fence leased {} — executing kubectl scale up.",
+                cluster_domain
+            );
             // (the real kubectl call would run here)
-            let cert = commit_effect_cert(&fence, prepared, json!({ "scaled": true }))
-                .expect("commit");
+            let cert =
+                commit_effect_cert(&fence, prepared, json!({ "scaled": true })).expect("commit");
             println!("  DONE. EffectCert minted:");
-            println!("     domain={} seq={} agent={}", cert.domain, cert.seq, cert.agent);
+            println!(
+                "     domain={} seq={} agent={}",
+                cert.domain, cert.seq, cert.agent
+            );
             println!("     hash={}", cert.hash);
             println!("     verify() -> {}", cert.verify());
         }
@@ -101,14 +107,22 @@ fn main() {
     };
 
     match prepare_effect_fence(&fence, req_b) {
-        Err(FenceError::ReadSetStale { domain, expected, actual }) => {
+        Err(FenceError::ReadSetStale {
+            domain,
+            expected,
+            actual,
+        }) => {
             println!("  REFUSED before kubectl ran:");
-            println!("     read-set for `{}` is stale: B decided on seq {}, world is at seq {}.",
-                     domain, expected, actual);
-            println!("  -> B re-reads post-A state, sees the pool is already scaling, stands down.");
+            println!(
+                "     read-set for `{}` is stale: B decided on seq {}, world is at seq {}.",
+                domain, expected, actual
+            );
+            println!(
+                "  -> B re-reads post-A state, sees the pool is already scaling, stands down."
+            );
         }
         Ok(adm) => println!("  LEAK: fence admitted a stale-read scale-down: {:?}", adm),
-        Err(e)  => println!("  refused ({e})"),
+        Err(e) => println!("  refused ({e})"),
     }
 
     // ---- Agent C: rollback on a CONCURRENT causal view. Detected. ----------
