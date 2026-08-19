@@ -822,10 +822,43 @@ pub fn prepare_effect_fence(
 
     // Gate 3: CAS domain reservation (the race decision is a single
     // compare_exchange; the counter lookup is behind a short mutex).
-    let expected_seq = fence.current(&req.domain);
-    let seq = match fence.reserve(&req.domain, expected_seq) {
-        Ok(seq) => seq,
-        Err(actual) => {
+    //
+    // Losing that CAS means two different things depending on what the caller
+    // claimed. A caller whose read set names THIS domain decided on its state,
+    // so a concurrent advance invalidates that decision -- refuse it
+    // (`DomainRace`). A caller that named no dependency on it is merely
+    // contending for the next sequence number: refusing there would reject a
+    // genuinely DIFFERENT action (a distinct intent) only because a sibling
+    // call landed in the same instant. `wrap` derives one domain per tool
+    // name, so every parallel call to that tool collides this way -- the
+    // failure is spurious and fails CLOSED on legitimate work. Those callers
+    // re-read the head and take the next number instead.
+    let claims_this_domain = req.read_set.iter().any(|e| e.domain == req.domain);
+    // Bounded so a pathological hot domain can never spin forever; each pass
+    // is one CAS, and some caller always makes progress (lock-free).
+    const RESERVE_ATTEMPTS: usize = 1024;
+    let mut last_expected = 0;
+    let mut last_actual = 0;
+    let mut reserved = None;
+    for _ in 0..RESERVE_ATTEMPTS {
+        let expected_seq = fence.current(&req.domain);
+        match fence.reserve(&req.domain, expected_seq) {
+            Ok(seq) => {
+                reserved = Some(seq);
+                break;
+            }
+            Err(actual) => {
+                last_expected = expected_seq;
+                last_actual = actual;
+                if claims_this_domain {
+                    break;
+                }
+            }
+        }
+    }
+    let seq = match reserved {
+        Some(seq) => seq,
+        None => {
             fence.release_intent(&req.intent);
             fence
                 .inner
@@ -834,8 +867,8 @@ pub fn prepare_effect_fence(
                 .fetch_add(1, Ordering::Relaxed);
             return Err(FenceError::DomainRace {
                 domain: req.domain.clone(),
-                expected: expected_seq,
-                actual,
+                expected: last_expected,
+                actual: last_actual,
             });
         }
     };
