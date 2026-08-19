@@ -7,6 +7,8 @@
 //! Built on the official `rmcp` SDK rather than a hand-rolled JSON-RPC
 //! layer.
 
+use std::io::IsTerminal;
+
 use anyhow::Result;
 use effectfence::fence::{
     Admission, EffectFence, EffectRequest, PreparedEffect, abort_effect, commit_effect_cert,
@@ -131,26 +133,92 @@ impl EffectFenceServer {
 
 #[tool_handler(
     name = "effectfence",
-    version = "0.1.9", // KEEP IN SYNC with Cargo.toml -- the macro rejects env!(); test below enforces it
+    version = "0.1.10", // KEEP IN SYNC with Cargo.toml -- the macro rejects env!(); test below enforces it
     instructions = "Causal effect fencing for multi-agent tool calls. Before any side-effecting tool call (charging, sending, provisioning), call fence_prepare with a stable `intent` id for the action; run the tool only on {status:'fresh'}, then report the outcome with fence_commit (success) or fence_abort (failure). Duplicates of a completed action get its recorded cert back instead of running again, and concurrent attempts at the same action are serialized to exactly one winner."
 )]
 impl ServerHandler for EffectFenceServer {}
 
+fn print_help() {
+    let v = env!("CARGO_PKG_VERSION");
+    println!(
+        "\
+effectfence {v} — stop AI agents double-firing side effects.
+
+Twelve agents reaching for one action (a retry after a timeout, two agents on
+one task) can fire it twelve times. effectfence admits it exactly once.
+
+USAGE
+  effectfence demo
+      See it with zero setup. Nothing installs, no real call fires: twelve
+      identical charges hit a built-in server raw (12 duplicates), then behind
+      the fence (exactly 1). Start here.
+
+  effectfence probe --tool <name> [--args '<json>'] [--calls N] -- <cmd>...
+      Point it at YOUR MCP server. Fires N identical concurrent calls at one
+      tool and reports how many real effects landed. Use a TEST tool: it
+      really calls the server. Example:
+        effectfence probe --tool charge_card --args '{{\"amount\":4900}}' \\
+          --calls 12 -- npx -y your-mcp-server
+
+  effectfence wrap -- <cmd that starts an MCP server>...
+      Put the fence IN FRONT of a server. Every identical duplicate call
+      executes once; later duplicates get the recorded result. No agent
+      changes. Example:
+        effectfence wrap -- npx -y kubernetes-mcp-server
+
+  effectfence                (no args, piped stdio)
+      Run as an MCP server exposing fence_prepare / fence_commit / fence_abort.
+      This is what an MCP client launches; it is not meant for a terminal.
+
+  effectfence --help | --version
+
+Docs: https://github.com/aurumflux20/effectfence"
+    );
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() >= 2 && args[1] == "wrap" {
-        // `effectfence wrap -- <command> [args...]` (the `--` is optional)
-        let child: Vec<String> = args[2..]
-            .iter()
-            .skip_while(|a| a.as_str() == "--")
-            .cloned()
-            .collect();
-        return effectfence::wrap::run_wrap(child).await;
-    }
-    if args.len() >= 2 && args[1] == "probe" {
-        // `effectfence probe --tool <name> [--args '<json>'] [--calls N] -- <command> [args...]`
-        return effectfence::probe::run_probe(args[2..].to_vec()).await;
+    match args.get(1).map(String::as_str) {
+        Some("--help" | "-h" | "help") => {
+            print_help();
+            return Ok(());
+        }
+        Some("--version" | "-V" | "version") => {
+            println!("effectfence {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        Some("demo") => return effectfence::demo::run_demo().await,
+        // Hidden: the built-in fake server the demo talks to. Blocking stdin loop.
+        Some("__demo-server") => {
+            return tokio::task::spawn_blocking(effectfence::demo::run_demo_server).await?;
+        }
+        Some("wrap") => {
+            // `effectfence wrap -- <command> [args...]` (the `--` is optional)
+            let child: Vec<String> = args[2..]
+                .iter()
+                .skip_while(|a| a.as_str() == "--")
+                .cloned()
+                .collect();
+            return effectfence::wrap::run_wrap(child).await;
+        }
+        Some("probe") => {
+            // `effectfence probe --tool <name> [--args '<json>'] [--calls N] -- <command> [args...]`
+            return effectfence::probe::run_probe(args[2..].to_vec()).await;
+        }
+        Some(other) => {
+            eprintln!("effectfence: unknown command `{other}`.\n");
+            print_help();
+            return Ok(());
+        }
+        None => {
+            // No subcommand. A human at a terminal gets help, not a silent hang;
+            // an MCP client (which pipes stdio) gets the fenced server.
+            if std::io::stdin().is_terminal() {
+                print_help();
+                return Ok(());
+            }
+        }
     }
     let service = EffectFenceServer::default().serve(stdio()).await?;
     service.waiting().await?;

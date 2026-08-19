@@ -151,6 +151,25 @@ match prepare_effect_fence(&fence, req)? {
 
 A concurrent duplicate of the same intent gets `Err(FenceError::IntentInFlight)`; a same-instant race on the domain gets `Err(FenceError::DomainRace)`; either way it must not run the effect.
 
+## Try it in 10 seconds (nothing installs, nothing real fires)
+
+```bash
+cargo install effectfence   # or: npx -y effectfence demo
+effectfence demo
+```
+
+Twelve agents reach for one $49 charge at the same instant. You'll see it hit a
+built-in server **raw** — 12 duplicate charges — then the **same twelve calls
+behind the fence**: exactly 1. This binary is talking to itself, so no real
+call fires and you need no server of your own to see the point.
+
+```text
+── Act 1: the raw server, no fence ──
+  DISTINCT effects    : 12      PROVEN DOUBLE-FIRE
+── Act 2: the SAME twelve calls, behind the fence ──
+  DISTINCT effects    : 1       12 callers, 12 clean answers, one execution
+```
+
 ## First: does YOUR stack actually double-fire? (probe it)
 
 Before you install a fence, prove you need one — on your own server, not our demo.

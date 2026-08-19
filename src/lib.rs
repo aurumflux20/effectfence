@@ -8,3 +8,6 @@ pub mod wrap;
 
 #[cfg(feature = "mcp-server")]
 pub mod probe;
+
+#[cfg(feature = "mcp-server")]
+pub mod demo;

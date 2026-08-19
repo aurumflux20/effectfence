@@ -8,6 +8,16 @@ npx effectfence wrap -- npx -y your-mcp-server
 
 No Rust toolchain. No build step. No install-time downloads.
 
+## Try it in 10 seconds
+
+```bash
+npx -y effectfence demo
+```
+
+No install, no server of your own, no real call fired. Twelve agents reach for
+one $49 charge at once — you see it hit a built-in server **raw** (12 duplicate
+charges), then the **same twelve behind the fence** (exactly 1).
+
 ## Prove your stack double-fires first
 
 Don't take our word for it — check your own server. `probe` fires N byte-identical

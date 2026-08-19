@@ -1,6 +1,6 @@
 [package]
 name = "effectfence"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2024"
 description = "Causal concurrency fence for multi-agent tool calls: an intent ledger, OCC read-sets, and atomic CAS domain reservation stop double-execution — same-instant races and late duplicate retries alike. Ships as a library and an MCP server."
 license = "MIT"
