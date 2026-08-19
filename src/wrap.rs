@@ -36,7 +36,9 @@ use rmcp::{
 };
 use sha2::{Digest, Sha256};
 
-use crate::fence::{Admission, EffectFence, EffectRequest, VectorClock, prepare_effect_fence};
+use crate::fence::{
+    Admission, EffectFence, EffectRequest, FenceError, VectorClock, prepare_effect_fence,
+};
 
 /// Derive the intent for a tool call: SHA-256 over the tool name and the
 /// JSON arguments serialized with sorted keys (via BTreeMap round-trip),
@@ -84,7 +86,54 @@ struct WrapServer {
     child_name: Arc<str>,
 }
 
+/// How long a duplicate waits for the in-flight original to commit before
+/// giving up. Longer than most tool calls, shorter than a stuck one.
+const IN_FLIGHT_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Poll interval while waiting. Short enough to feel immediate, long enough
+/// not to spin a core.
+const IN_FLIGHT_POLL: std::time::Duration = std::time::Duration::from_millis(25);
+
 impl WrapServer {
+    /// Wait for the caller holding `intent` to finish, then return its
+    /// recorded result. Returns `None` if it has not committed in time --
+    /// which never means "run it anyway", only "we still do not know".
+    async fn await_holder(
+        &self,
+        intent: &str,
+        args: &serde_json::Value,
+        tool: &str,
+    ) -> Option<CallToolResult> {
+        let deadline = tokio::time::Instant::now() + IN_FLIGHT_WAIT;
+        while tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(IN_FLIGHT_POLL).await;
+            // Re-admitting is how we observe the outcome: once the holder
+            // commits, the same intent answers Replay with its cert.
+            match prepare_effect_fence(
+                &self.fence,
+                EffectRequest {
+                    intent: intent.to_string(),
+                    parent: None,
+                    domain: format!("tool:{tool}"),
+                    tool: tool.to_string(),
+                    args: args.clone(),
+                    read_set: vec![],
+                    agent: "effectfence-wrap".to_string(),
+                    known_clock: VectorClock::new(),
+                },
+            ) {
+                Ok(Admission::Replay(cert)) => {
+                    return serde_json::from_value::<CallToolResult>(cert.result.clone()).ok();
+                }
+                // Still running -- keep waiting.
+                Err(FenceError::IntentInFlight { .. }) => continue,
+                // The holder aborted or failed; we are not going to silently
+                // re-run its effect, so report rather than execute.
+                _ => return None,
+            }
+        }
+        None
+    }
+
     async fn forward(&self, req: CallToolRequestParams) -> Result<CallToolResult, McpError> {
         self.child
             .call_tool(req)
@@ -130,6 +179,11 @@ impl ServerHandler for WrapServer {
     ) -> Result<CallToolResponse, McpError> {
         let args_value = serde_json::Value::Object(request.arguments.clone().unwrap_or_default());
         let intent = derive_intent(&request.name, &args_value);
+        let tool_name = request.name.to_string();
+        // Kept for the in-flight wait path below: the originals are moved into
+        // the EffectRequest.
+        let intent_for_wait = intent.clone();
+        let args_for_wait = args_value.clone();
 
         let admission = prepare_effect_fence(
             &self.fence,
@@ -190,11 +244,33 @@ impl ServerHandler for WrapServer {
                     })?;
                 Ok(replay.into())
             }
+            // An identical call that arrives while the first is still running
+            // is the ordinary twin-caller race, not an error: the caller wants
+            // the ONE result, and it is moments away. Returning a failure here
+            // made the common case look broken -- an agent sees a tool error
+            // and reports failure for work that is about to succeed. Wait for
+            // the holder to commit, then hand back its recorded result.
+            Err(FenceError::IntentInFlight { .. }) => {
+                match self
+                    .await_holder(&intent_for_wait, &args_for_wait, &tool_name)
+                    .await
+                {
+                    Some(replay) => Ok(replay.into()),
+                    None => Ok(CallToolResponse::Complete(CallToolResult::error(vec![
+                        ContentBlock::text(format!(
+                            "effectfence: an identical call to `{tool_name}` is still running and \
+                             did not finish within {}s. It was NOT executed a second time. Retry \
+                             to receive its recorded result.",
+                            IN_FLIGHT_WAIT.as_secs()
+                        )),
+                    ]))),
+                }
+            }
             Err(err) => Ok(CallToolResponse::Complete(CallToolResult::error(vec![
                 ContentBlock::text(format!(
-                    "effectfence: duplicate call refused ({err}). If this was intentional as a NEW \
-                 action, vary the arguments; if you are waiting on the first attempt, retry \
-                 shortly to receive its recorded result."
+                    "effectfence: call refused ({err}). This action was NOT executed. If it was \
+                 intentionally a NEW action, vary the arguments; if a dependency moved, re-read \
+                 and try again."
                 )),
             ]))),
         }
