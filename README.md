@@ -397,12 +397,23 @@ Use EffectFence when your fence lives in Rust or in front of an MCP server; use 
 
 ## Commercial support
 
-The libraries are free and stay free. If you want help applying them to a
-codebase that already moves money — a fixed-scope audit of every side-effecting
-path, storm-tested, with a CI test that keeps it fenced — see
-[SUPPORT.md](SUPPORT.md) or email **hello@aurumflux.co**.
+The libraries are free and stay free.
 
-If it isn't a fit we'll say so.
+**Retry Safety Review — $1,200, and no invoice if we find nothing.** We read one
+money path in your codebase and hunt the defect that survives good engineering:
+not "is there an idempotency key" (most competent teams have one), but what
+happens when a payment fails *ambiguously* — the request that timed out after it
+settled, the retry that mints a fresh nonce, the reservation released on a
+failure that wasn't one. Five working days, written report tied to your own file
+and line numbers, no calls.
+
+It's the class of defect we hunt in public: `hpp-io/x402-mcp-bridge` shipped two
+fixes from our findings, `mcp-server-kibana` merged two PRs. Details in
+[SUPPORT.md](SUPPORT.md); to start, email **hello@aurumflux.co** with the
+repository and which money path matters most.
+
+If it isn't a fit we'll say so — and if we don't think we can find anything, we
+say that instead of billing you for a clean bill of health.
 
 ## License
 
