@@ -11,33 +11,29 @@ The one-sentence version of what you get: **done means done on your sends** —
 receipted, never on a self-report. We run this on our own production mail
 path; the audit wires the same discipline into yours.
 
-## The Fence Audit — 5 working days, fixed scope
+## Retry Safety Review — $1,200, refunded in full if we find nothing
 
-**Day 1 — Inventory.** Every side-effecting call in your codebase: what fires,
-from where, under what retry and concurrency conditions. You keep the list
-whether or not you continue.
+We read one money path in your codebase — the tool, SDK or service that actually
+moves funds — and hunt one specific class of defect: **what happens when a
+payment fails ambiguously.** Not "is there an idempotency key" (most competent
+teams have that), but the timeout *after* the money may already have moved — the
+aborted request that settled anyway, the retry that mints a fresh nonce, the
+reservation released on a failure that wasn't one.
 
-**Day 2 — Attack.** We build a storm harness against your top three money or
-message paths — concurrent racers plus late retries — and try to make each fire
-twice. Findings are reproducible, not theoretical.
+**You get:** a written report, each finding tied to your own file and line
+numbers, a reproduction where one is possible, and a recommended fix. Five
+working days. Written only — no calls.
 
-**Day 3 — The three decisions**, in a working session, because they take
-judgement and cannot be automated:
-- **What is the key?** What makes two attempts "the same operation". Get it
-  wrong and you either block legitimate work or let real duplicates through.
-- **What goes in the fingerprint?** Timestamps, trace ids and retry counters
-  have to be excluded, or every retry looks like a different payload.
-- **Fail-open or fail-closed, per effect?** A charge must fail closed. A
-  notification usually should not. Most teams have never decided this explicitly.
+**You pay $1,200 up front. If we find no real defect, we refund it in full** —
+and you keep the report saying so.
 
-**Day 4 — Wire it in.** Fence the top three paths. Both libraries are yours to
-keep; there is no lock-in and nothing to host.
+**[Book a review — $1,200](https://buy.stripe.com/28E7sL91C9naapQbBVdIA0l)** · after checkout, reply to the receipt with
+the repository and which money path matters most. Or email **hello@aurumflux.co**
+first if you'd rather talk it through — and if we don't think we can find
+anything, we say so before you pay.
 
-**Day 5 — Prove it.** A storm test in *your* CI that fails the build if a fenced
-effect ever executes twice, plus a runbook: what is fenced, what is not, and what
-to do when a fence trips at 3am.
-
-Ongoing support and enterprise arrangements exist too. Ask.
+For a deeper engagement — installing the full write-authority gateway on a money
+path — see [github.com/aurumflux20/seal](https://github.com/aurumflux20/seal).
 
 ## What this is not
 
