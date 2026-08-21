@@ -196,6 +196,56 @@ fn shuffled_argument_key_order_is_still_the_same_action() {
     );
 }
 
+/// A prepared-effect ticket whose read set can never validate, so the
+/// child's `fence_commit` always answers with a tool-level error.
+fn doomed_commit_args(intent: &str) -> serde_json::Value {
+    serde_json::json!({
+        "prepared": {
+            "intent": intent,
+            "parent": null,
+            "domain": "order:doomed",
+            "seq": 1,
+            "tool": "charge_card",
+            "args": {"amount_cents": 4900},
+            "vector_clock": {},
+            "read_set": [{"domain": "inventory:never-reserved", "seq": 9}],
+            "agent": "wrap-test"
+        },
+        "result": {"charge_id": "ch_1"}
+    })
+}
+
+#[test]
+fn a_tool_level_error_does_not_brick_the_identical_retry() {
+    // The child answered definitively (isError), so wrap is supposed to
+    // "free the intent so the agent's retry can execute again" -- its own
+    // words, and what its instructions promise the agent. If wrap instead
+    // FENCES the intent, this exact call is refused at the proxy for the
+    // whole result_ttl (24h) with no escape hatch: a transient error from
+    // any wrapped tool permanently bricks that call.
+    let mut mcp = Mcp::spawn_wrap_of_self();
+    let args = doomed_commit_args("charge:wrap-err-1");
+
+    let first = mcp.call_tool("fence_commit", args.clone());
+    let first_text = first.to_string();
+    assert!(
+        first_text.contains("stale"),
+        "expected the child's ReadSetStale error to come back, got {first}"
+    );
+
+    let second = mcp.call_tool("fence_commit", args);
+    let second_text = second.to_string();
+    assert!(
+        !second_text.contains("call refused"),
+        "wrap fenced the intent after a tool-level error -- the identical retry \
+         never reached the child and is now bricked. Got: {second}"
+    );
+    assert!(
+        second_text.contains("stale"),
+        "the retry should have reached the child and got its error again, got {second}"
+    );
+}
+
 #[test]
 fn genuinely_different_arguments_pass_through_as_new_actions() {
     let mut mcp = Mcp::spawn_wrap_of_self();

@@ -126,6 +126,15 @@ impl WrapServer {
                 }
                 // Still running -- keep waiting.
                 Err(FenceError::IntentInFlight { .. }) => continue,
+                // The holder released the intent (tool-level error) or its
+                // lease lapsed, so re-admitting just handed US the lease.
+                // Drop it: we are not going to silently re-run the holder's
+                // effect, and keeping it would leave the intent in flight,
+                // blocking the caller's own retry until the lease expires.
+                Ok(Admission::Fresh(prepared)) => {
+                    self.fence.clear_intent(&prepared.intent);
+                    return None;
+                }
                 // The holder aborted or failed; we are not going to silently
                 // re-run its effect, so report rather than execute.
                 _ => return None,
@@ -204,24 +213,25 @@ impl ServerHandler for WrapServer {
                 let result = match self.forward(request).await {
                     Ok(r) => r,
                     Err(e) => {
-                        // Child errored before we know the outcome: free the
-                        // intent so a retry may execute (fail-safe direction).
+                        // The transport died before the child answered, so
+                        // whether the effect fired is UNKNOWN. Fence the intent
+                        // (this is the double-charge case the crate exists for);
+                        // freeing it here would be the fail-dangerous direction.
                         crate::fence::abort_effect(&self.fence, prepared, e.to_string());
                         return Err(e);
                     }
                 };
                 let stored = serde_json::to_value(&result)
                     .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-                // Tool-level errors (isError) are NOT terminal successes:
-                // free the intent so the agent's retry can execute again.
+                // A tool-level error is the child ANSWERING: it ran and reported
+                // failure. That is neither a terminal success nor an unknown
+                // outcome, so release the lease outright and let an identical
+                // retry execute. Fencing here (what abort_effect does) refused
+                // the retry for the whole result_ttl -- 24h by default -- and
+                // wrap exposes no clear_intent, so one transient error from any
+                // wrapped tool bricked that exact call for the rest of the day.
                 if result.is_error.unwrap_or(false) {
-                    // Tool-level errors are not terminal successes: free the
-                    // intent so the agent's retry can execute again.
-                    crate::fence::abort_effect(
-                        &self.fence,
-                        prepared,
-                        "child returned a tool-level error".to_string(),
-                    );
+                    self.fence.clear_intent(&prepared.intent);
                     return Ok(result.into());
                 }
                 match crate::fence::commit_effect_cert(&self.fence, prepared, stored) {
@@ -265,6 +275,21 @@ impl ServerHandler for WrapServer {
                         )),
                     ]))),
                 }
+            }
+            // A fenced intent is NOT retryable by re-reading and trying again:
+            // an earlier attempt died with its outcome unknown, and the fence
+            // holds until a human reconciles. Saying "try again" here sent
+            // agents into a retry loop that could never succeed.
+            Err(err @ FenceError::IntentFailed { .. }) => {
+                Ok(CallToolResponse::Complete(CallToolResult::error(vec![
+                    ContentBlock::text(format!(
+                        "effectfence: call fenced ({err}). An earlier identical call to \
+                         `{tool_name}` failed with its outcome UNKNOWN, so this one was NOT \
+                         executed and retrying it cannot clear the fence. Check the downstream \
+                         system for whether the first attempt took effect; if it did not, this \
+                         action needs a new intent (vary the arguments) or an operator reset."
+                    )),
+                ])))
             }
             Err(err) => Ok(CallToolResponse::Complete(CallToolResult::error(vec![
                 ContentBlock::text(format!(
