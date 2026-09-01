@@ -32,8 +32,11 @@ the repository and which money path matters most. Or email **hello@aurumflux.co*
 first if you'd rather talk it through — and if we don't think we can find
 anything, we say so before you pay.
 
-For a deeper engagement — installing the full write-authority gateway on a money
-path — see [github.com/aurumflux20/seal](https://github.com/aurumflux20/seal).
+For a deeper engagement — **Money-Path Assurance, $9,000**: the same reading taken
+all the way to a written attestation you can hand a board, auditor, or insurer,
+with a conformance run against the draft retry-safety standard we co-authored (an
+unadopted MCP proposal) — see
+[github.com/aurumflux20/seal](https://github.com/aurumflux20/seal/blob/main/SUPPORT.md).
 
 ## What this is not
 
