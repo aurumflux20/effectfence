@@ -1,5 +1,7 @@
 # EffectFence
 
+> **Public register:** the [Retry-Safety Index](https://aurumflux.co/retry-safety/) lists which agent-payment implementations pay once when the answer is lost — verified safe, found & fixed (with time-to-fix), and how to get verified. Every row links to its proof.
+
 [![CI](https://github.com/aurumflux20/effectfence/actions/workflows/ci.yml/badge.svg)](https://github.com/aurumflux20/effectfence/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/effectfence.svg)](https://crates.io/crates/effectfence)
 [![docs.rs](https://img.shields.io/docsrs/effectfence)](https://docs.rs/effectfence)
