@@ -2,6 +2,13 @@
 
 All notable changes to EffectFence.
 
+## [0.1.12] — 2026-09-04
+
+- README (npm): the package page now says who maintains EffectFence and where to get a
+  free retry-safety read, and carries the one paid offer at the end. The published
+  README previously contained no price, link or contact at all — several thousand
+  installs a month and no way for any of them to reach us. No code changes.
+
 ## [0.1.1] — 2026-08-04
 
 ### Fixed
