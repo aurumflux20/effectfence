@@ -9,6 +9,9 @@
 
 **Your swarm doesn't need more memory. It needs a causal fence around tool side effects.**
 
+> **Free:** submit any client, facilitator, SDK or toolkit that moves money — yours or someone else's — and we read it and publish a verdict on the [Retry-Safety Index](https://aurumflux.co/retry-safety/) at no cost. Findings come back with the mechanism, the file and line, and a failing test. You are counted, never named, until you ship a fix. **[Submit for grading →](https://github.com/aurumflux20/hostile-facilitator/issues/new?template=submit.yml)**
+
+
 ```
 ⚡ effectfence — THE STORM
 1,000 attempts to charge order #777 ($49.00): concurrent racers + late retries…
